@@ -8,6 +8,7 @@ from datetime import datetime
 import google.generativeai as genai
 import re
 import time
+import requests
 from finvizfinance.quote import finvizfinance 
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
@@ -36,6 +37,44 @@ st.markdown("""
     .peer-median-row { background-color: #21262d; font-weight: bold; color: #8b949e; border-top: 2px solid #30363d; }
 </style>
 """, unsafe_allow_html=True)
+
+# 💡 [핵심 엔진] 미국 증권거래위원회(SEC) 1만개 티커 실시간 스크래핑
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_all_us_tickers():
+    # SEC에 잡히지 않는 유명 레버리지/인버스 ETF 수동 추가
+    etf_list = [
+        "SPY (SPDR S&P 500 ETF Trust)", "QQQ (Invesco QQQ Trust)", "DIA (SPDR Dow Jones Industrial Average ETF)",
+        "TQQQ (ProShares UltraPro QQQ)", "SQQQ (ProShares UltraPro Short QQQ)", "SOXX (iShares Semiconductor ETF)",
+        "SOXL (Direxion Daily Semiconductor Bull 3X)", "SOXS (Direxion Daily Semiconductor Bear 3X)",
+        "TSLL (Direxion Daily TSLA Bull 2X)", "TSLQ (AXS TSLA Bear Daily ETF)",
+        "SCHD (Schwab US Dividend Equity ETF)", "JEPI (JPMorgan Equity Premium Income ETF)",
+        "VOO (Vanguard S&P 500 ETF)", "VTI (Vanguard Total Stock Market ETF)", "ARKK (ARK Innovation ETF)",
+        "NVDL (GraniteShares 1.5x Long NVDA)", "NVDS (AXS 1.25x NVDA Bear ETF)", 
+        "FNGU (MicroSectors FAANG+ Bull 3X)", "UPRO (ProShares UltraPro S&P500)",
+        "CONY (GraniteShares 1.5x Long COIN)"
+    ]
+    tickers = []
+    try:
+        url = "https://www.sec.gov/files/company_tickers.json"
+        # SEC 방어벽 우회를 위한 특수 헤더
+        headers = {"User-Agent": "AntRichQuantBot/1.0 (antrichquant@google.com)"}
+        res = requests.get(url, headers=headers, timeout=5)
+        data = res.json()
+        for v in data.values():
+            tickers.append(f"{v['ticker']} ({v['title'].title()})")
+    except:
+        pass
+    
+    top_stocks = ["AAPL (Apple Inc.)", "MSFT (Microsoft Corp)", "NVDA (NVIDIA Corp)", "TSLA (Tesla Inc.)", "AMZN (Amazon.com Inc.)", "GOOGL (Alphabet Inc.)", "META (Meta Platforms Inc.)"]
+    combined = top_stocks + etf_list + tickers
+    
+    seen = set()
+    result = []
+    for item in combined:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 def parse_fz(val, vtype='float'):
     if not isinstance(val, str): return val
@@ -108,7 +147,6 @@ def get_peers_data(ticker, peer_str):
 @st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... 📡") 
 def get_stock_market_data(ticker):
     stock = yf.Ticker(ticker)
-    
     info = {}
     try: info = stock.info or {}
     except: pass
@@ -157,9 +195,21 @@ PEER_MAP = {
 
 with st.sidebar:
     st.markdown("### ⚙️ 분석 설정")
-    # 💡 1. 종목 티커 전용 검색기로 깔끔하게 통일
-    raw_input = st.text_input("종목 티커 입력 (예: AAPL, TSLA)", value="AAPL")
-    ticker_input = raw_input.strip().upper()
+    
+    # 💡 [핵심] 1만개 이상의 자동완성 티커 리스트 연동
+    all_tickers_list = get_all_us_tickers()
+    selected_option = st.selectbox(
+        "🔍 종목 검색 (알파벳을 치면 자동완성 됨)", 
+        ["➕ 직접 티커 수동 입력..."] + all_tickers_list, 
+        index=1,
+        help="여기에 티커(TSL 등)를 치면 관련 주식/ETF 목록이 나타납니다."
+    )
+    
+    if selected_option == "➕ 직접 티커 수동 입력...":
+        raw_input = st.text_input("티커를 정확히 입력하세요 (예: SOXL, TSLA)")
+        ticker_input = raw_input.strip().upper()
+    else:
+        ticker_input = selected_option.split(" ")[0].upper()
     
     st.divider()
     
@@ -211,10 +261,10 @@ with st.sidebar:
 
     peer_input = st.text_input("경쟁사 티커 (쉼표로 구분)", value=default_peers, help="AI가 자동으로 찾아낸 경쟁사입니다. 직접 수정하셔도 됩니다.")
 
-    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_tooltip':
+    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_dual':
         st.session_state.g_slider = default_g
         st.session_state.last_ticker = ticker_input
-        st.session_state.app_version = 'v_final_tooltip'
+        st.session_state.app_version = 'v_final_dual'
         
     st.divider()
     
@@ -240,12 +290,17 @@ with st.sidebar:
     st.button("🔄 SGR 기반 (AI추천)", on_click=set_g, args=(default_g,), width="stretch")
     st.caption(sgr_caption)
 
-# 💡 2. 듀얼 표기(달러+원화) 전용 포맷터
+# 💡 [핵심] 원화/달러 듀얼 표기 함수
 def fmt_price(val):
     if pd.isna(val) or val == "N/A" or val is None or val == 0: return "N/A"
     try:
         v = float(val)
-        return f"${v:,.2f} (₩{v * ex_rate:,.0f})"
+        usd_str = f"${v:,.2f}"
+        krw_val = v * ex_rate
+        if krw_val >= 1_000_000_000_000: krw_str = f"₩{krw_val/1e12:.1f}조"
+        elif krw_val >= 100_000_000: krw_str = f"₩{krw_val/1e8:.0f}억"
+        else: krw_str = f"₩{krw_val:,.0f}"
+        return f"{usd_str} ({krw_str})"
     except:
         return "N/A"
 
@@ -269,7 +324,7 @@ if ticker_input:
         info, fund_data, fcf_yf, hist, hist_10y, hist_weekly = get_stock_market_data(ticker)
         
         if hist.empty or len(hist) < 20:
-            st.error(f"[{ticker}] 차트 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주시거나 티커를 확인해 주세요.")
+            st.error(f"[{ticker}] 차트 데이터를 불러오지 못했습니다. 올바른 티커인지 확인해 주세요.")
         else:
             hist['SMA50'] = hist['Close'].rolling(window=50).mean()
             hist['SMA200'] = hist['Close'].rolling(window=200).mean()
@@ -473,11 +528,11 @@ if ticker_input:
                 if is_undervalued:
                     fund_color = "#3fb950"
                     fund_bg = "63, 185, 80"
-                    fund_desc += f"현재 주가({fmt_price(current_price).split(' ')[0]})는 {model_used}로 산출된 적정 주가({fmt_price(final_fair_value).split(' ')[0]}) 대비 **싸게(저평가)** 거래되고 있습니다. "
+                    fund_desc += f"현재 주가는 {model_used}로 산출된 적정 주가 대비 **싸게(저평가)** 거래되고 있습니다. "
                 else:
                     fund_color = "#f85149"
                     fund_bg = "248, 81, 73"
-                    fund_desc += f"현재 주가({fmt_price(current_price).split(' ')[0]})는 {model_used}로 산출된 적정 주가({fmt_price(final_fair_value).split(' ')[0]}) 대비 **비싸게(고평가)** 거래되고 있습니다. "
+                    fund_desc += f"현재 주가는 {model_used}로 산출된 적정 주가 대비 **비싸게(고평가)** 거래되고 있습니다. "
             else:
                 fund_desc += f"현재 적자 혹은 현금흐름 부족으로 인해 명확한 적정 주가를 산출하기 어렵습니다. "
                 
@@ -505,12 +560,14 @@ if ticker_input:
                 peg_val = f"{peg_ratio:.2f}배" if peg_ratio else "N/A"
                 peg_delta = ("저평가 구간" if peg_ratio and peg_ratio <= 1.0 else "고평가 구간") if peg_ratio else None
                 peg_help_text = "PER(주가수익비율)을 이익성장률로 나눈 값입니다. 보통 1.0 이하이면 기업의 미래 성장 속도에 비해 현재 주가가 싸다(저평가)고 판단합니다."
+                if peg_ratio is None: 
+                    peg_help_text += "\n\n🚨 [N/A 발생 이유]\n해당 기업이 적자 상태이거나 핀비즈/야후 파이낸스에 향후 5년 성장률 추정치가 존재하지 않기 때문입니다."
                 
                 fcf_val = "N/A"
                 if fcf is not None:
                     fcf_usd = f"${fcf/1e12:.2f}T" if fcf >= 1e12 else (f"${fcf/1e9:.2f}B" if fcf >= 1e9 else f"${fcf/1e6:.2f}M")
                     fcf_krw_val = fcf * ex_rate
-                    fcf_krw = f"₩{fcf_krw_val/1e12:.2f}조" if fcf_krw_val >= 1e12 else (f"₩{fcf_krw_val/1e8:.2f}억" if fcf_krw_val >= 1e8 else f"₩{fcf_krw_val:,.0f}")
+                    fcf_krw = f"₩{fcf_krw_val/1e12:.1f}조" if fcf_krw_val >= 1e12 else (f"₩{fcf_krw_val/1e8:.0f}억" if fcf_krw_val >= 1e8 else f"₩{fcf_krw_val:,.0f}")
                     fcf_val = f"{fcf_usd} ({fcf_krw})"
                 
                 payout_val = f"{payout_ratio * 100:.1f}%" if payout_ratio else "N/A"
@@ -630,7 +687,7 @@ if ticker_input:
                 for _, row in peer_df.iterrows():
                     is_main = row['Ticker'] == ticker
                     row_class = "peer-main-row" if is_main else ""
-                    table_html += f"<tr class='{row_class}'><td>{row['Ticker']}</td><td>{fmt_price(row['Price'])}</td><td>{fmt_multi(row['Fwd P/E'])}</td><td>{fmt_multi(row['EV/EBITDA'])}</td><td>{fmt_multi(row['P/S'])}</td><td>{fmt_multi(row['EV/Rev'])}</td></tr>"
+                    table_html += f"<tr class='{row_class}'><td>{row['Ticker']}</td><td>{fmt_price(row['Price']).split(' ')[0]}</td><td>{fmt_multi(row['Fwd P/E'])}</td><td>{fmt_multi(row['EV/EBITDA'])}</td><td>{fmt_multi(row['P/S'])}</td><td>{fmt_multi(row['EV/Rev'])}</td></tr>"
                 
                 median_pe = peer_df['Fwd P/E'].median()
                 median_ev_ebitda = peer_df['EV/EBITDA'].median()
