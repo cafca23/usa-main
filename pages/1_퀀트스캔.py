@@ -7,9 +7,6 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import google.generativeai as genai
 import re
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -38,29 +35,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==============================================================
-# 💡 [핵심 패치] 야후 파이낸스 차단 방지용 스텔스 세션 생성기
-# ==============================================================
-def get_yf_session():
-    session = requests.Session()
-    # 429(Too Many Requests) 에러 발생 시 자동으로 간격을 두고 재시도합니다.
-    retry = Retry(connect=3, backoff_factor=1.0, status_forcelist=[429, 500, 502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    # 야후 서버가 봇으로 인식하지 못하도록 구글 크롬 웹브라우저로 완벽히 위장합니다.
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    })
-    return session
-
-# 💡 실시간 거시경제 데이터 (스텔스 세션 적용)
+# 💡 실시간 거시경제 데이터 (야후 자체 엔진 활용)
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_macro_data():
-    session = get_yf_session()
-    try: usdkrw = yf.Ticker("USDKRW=X", session=session).history(period="1d")['Close'].iloc[-1]
+    try: usdkrw = yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1]
     except: usdkrw = 1350.0
-    try: tnx = yf.Ticker("^TNX", session=session).history(period="1d")['Close'].iloc[-1]
+    try: tnx = yf.Ticker("^TNX").history(period="1d")['Close'].iloc[-1]
     except: tnx = 4.2  
     return float(usdkrw), float(tnx)
 
@@ -77,17 +57,16 @@ def get_dynamic_peers(ticker, name, sector):
         return clean_res
     except: return ""
 
-# 💡 경쟁사 데이터 수집 (스텔스 세션 적용)
+# 💡 경쟁사 데이터 수집 (야후 자체 엔진 활용)
 @st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다...") 
 def get_peers_data(ticker, peer_str):
-    session = get_yf_session()
     peer_list = [p.strip().upper() for p in peer_str.split(",") if p.strip()]
     if ticker not in peer_list:
         peer_list = [ticker] + peer_list
     data = []
     for p in peer_list:
         try:
-            info = yf.Ticker(p, session=session).info
+            info = yf.Ticker(p).info
             data.append({
                 "Ticker": p,
                 "Price": info.get("currentPrice", np.nan),
@@ -99,11 +78,10 @@ def get_peers_data(ticker, peer_str):
         except: pass
     return pd.DataFrame(data)
 
-# 💡 개별 종목 데이터 수집 (스텔스 세션 적용)
+# 💡 개별 종목 데이터 수집 (야후 자체 엔진 활용)
 @st.cache_data(ttl=300, show_spinner="티커 재무 데이터를 분석하고 있습니다...") 
 def get_stock_market_data(ticker):
-    session = get_yf_session()
-    stock = yf.Ticker(ticker, session=session)
+    stock = yf.Ticker(ticker)
     info = stock.info
     hist = stock.history(period="2y")
     hist_10y = stock.history(period="10y", interval="1mo")
