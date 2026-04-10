@@ -8,7 +8,7 @@ from datetime import datetime
 import google.generativeai as genai
 import re
 import time
-from finvizfinance.quote import finvizfinance # 💡 핀비즈 구원투수 등판!
+from finvizfinance.quote import finvizfinance 
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -37,7 +37,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 💡 [새로운 무기] 핀비즈의 문자열 데이터를 숫자로 변환하는 해독기
 def parse_fz(val, vtype='float'):
     if not isinstance(val, str): return val
     if val == '-' or val == 'N/A' or val == '': return None
@@ -72,7 +71,7 @@ def get_dynamic_peers(ticker, name, sector):
         return clean_res
     except: return ""
 
-@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... (Finviz 하이브리드 엔진 🐢)") 
+@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... 🐢") 
 def get_peers_data(ticker, peer_str):
     peer_list = [p.strip().upper() for p in peer_str.split(",") if p.strip()]
     if ticker not in peer_list:
@@ -82,10 +81,8 @@ def get_peers_data(ticker, peer_str):
     for p in peer_list:
         info = {}
         fund = {}
-        # 1. 야후 시도
         try: info = yf.Ticker(p).info or {}
         except: pass
-        # 2. 야후가 값을 안 주면 핀비즈 투입
         if not info.get('forwardPE'):
             try: fund = finvizfinance(p).ticker_fundament()
             except: pass
@@ -108,21 +105,18 @@ def get_peers_data(ticker, peer_str):
         
     return pd.DataFrame(data)
 
-@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... (Finviz 하이브리드 융합 📡)") 
+@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... 📡") 
 def get_stock_market_data(ticker):
     stock = yf.Ticker(ticker)
     
-    # 1. YF Info 가져오기
     info = {}
     try: info = stock.info or {}
     except: pass
         
-    # 2. 💡 Finviz Fundamentals 가져오기 (야후가 누락한 데이터 100% 백업용)
     fund_data = {}
     try: fund_data = finvizfinance(ticker).ticker_fundament()
     except: pass
     
-    # 3. YF Cash Flow (FCF 추출용)
     fcf_yf = None
     try:
         cf = stock.cash_flow
@@ -130,7 +124,6 @@ def get_stock_market_data(ticker):
             fcf_yf = float(cf.loc['Free Cash Flow'].iloc[0])
     except: pass
 
-    # 4. 차트 데이터
     hist_daily_5y = pd.DataFrame()
     for attempt in range(2):
         try:
@@ -154,8 +147,6 @@ def get_stock_market_data(ticker):
             
     return info, fund_data, fcf_yf, hist, hist_10y, hist_weekly
 
-# ==============================================================
-
 ex_rate, risk_free_rate = get_macro_data()
 
 PEER_MAP = {
@@ -164,33 +155,11 @@ PEER_MAP = {
     "AMZN": "WMT, TGT, GOOGL", "META": "GOOGL, SNAP, PINS", "AMD": "NVDA, INTC, QCOM"
 }
 
-# 서학개미 전용 한글 번역 사전
-US_TICKER_MAP = {
-    "애플": "AAPL", "마이크로소프트": "MSFT", "마소": "MSFT", "구글": "GOOGL", "알파벳": "GOOGL",
-    "아마존": "AMZN", "엔비디아": "NVDA", "메타": "META", "페이스북": "META", "테슬라": "TSLA",
-    "버크셔해서웨이": "BRK-B", "버크셔": "BRK-B", "일라이릴리": "LLY", "릴리": "LLY", "티에스엠씨": "TSM",
-    "브로드컴": "AVGO", "제이피모건": "JPM", "유나이티드헬스": "UNH", "비자": "V", "노보노디스크": "NVO",
-    "마스터카드": "MA", "존슨앤존슨": "JNJ", "엑슨모빌": "XOM", "홈디포": "HD", "프록터앤갬블": "PG",
-    "코스트코": "COST", "머크": "MRK", "애비브": "ABBV", "에이에스엠엘": "ASML", "세일즈포스": "CRM",
-    "셰브론": "CVX", "어드밴스드마이크로디바이시스": "AMD", "에이엠디": "AMD", "넷플릭스": "NFLX", "펩시": "PEP",
-    "코카콜라": "KO", "어도비": "ADBE", "월마트": "WMT", "시스코": "CSCO", "맥도날드": "MCD",
-    "인텔": "INTC", "퀄컴": "QCOM", "아이비엠": "IBM", "보잉": "BA", "디즈니": "DIS",
-    "에이티앤티": "T", "버라이즌": "VZ", "화이자": "PFE", "모더나": "MRNA", "스타벅스": "SBUX", "나이키": "NKE", 
-    "팔란티어": "PLTR", "암홀딩스": "ARM", "쿠팡": "CPNG", "니콜라": "NKLA", "로블록스": "RBLX", 
-    "우버": "UBER", "에어비앤비": "ABNB", "아이온큐": "IONQ", "루시드": "LCID", "리비안": "RIVN", 
-    "소파이": "SOFI", "유니티": "U", "스노우플레이크": "SNOW", "쇼피파이": "SHOP", "페이팔": "PYPL", 
-    "블록": "SQ", "스퀘어": "SQ", "줌": "ZM", "씨해": "SE", "슈마컴": "SMCI", "델": "DELL",
-    "티큐": "TQQQ", "에센피": "SPY", "나스닥": "QQQ", "속슬": "SOXL", "슈드": "SCHD", "스파이": "SPY"
-}
-
 with st.sidebar:
     st.markdown("### ⚙️ 분석 설정")
-    raw_input = st.text_input("종목 티커로 검색하세요", value="AAPL")
-    search_term = raw_input.strip()
-    ticker_input = US_TICKER_MAP.get(search_term, search_term).upper()
-    
-    currency_opt = st.radio("💱 표시 통화", ["$ 달러", "₩ 원화"], horizontal=True)
-    is_krw = currency_opt == "₩ 원화"
+    # 💡 1. 종목 티커 전용 검색기로 깔끔하게 통일
+    raw_input = st.text_input("종목 티커 입력 (예: AAPL, TSLA)", value="AAPL")
+    ticker_input = raw_input.strip().upper()
     
     st.divider()
     
@@ -271,10 +240,14 @@ with st.sidebar:
     st.button("🔄 SGR 기반 (AI추천)", on_click=set_g, args=(default_g,), width="stretch")
     st.caption(sgr_caption)
 
+# 💡 2. 듀얼 표기(달러+원화) 전용 포맷터
 def fmt_price(val):
     if pd.isna(val) or val == "N/A" or val is None or val == 0: return "N/A"
-    if is_krw: return f"₩{val * ex_rate:,.0f}"
-    return f"${val:,.2f}"
+    try:
+        v = float(val)
+        return f"${v:,.2f} (₩{v * ex_rate:,.0f})"
+    except:
+        return "N/A"
 
 def fmt_multi(val):
     if pd.isna(val) or val == "N/A" or val is None or val == 0: return "-"
@@ -307,7 +280,6 @@ if ticker_input:
             hist['RSI'] = 100 - (100 / (1 + rs))
             hist['OBV'] = (np.sign(hist['Close'].diff()) * hist['Volume']).fillna(0).cumsum()
 
-            # 💡 [하이브리드 교차 데이터 추출] 야후 실패 시 핀비즈 출동
             current_price = info.get('currentPrice') or parse_fz(fund_data.get('Price')) or hist['Close'].iloc[-1]
             sma50_val = hist['SMA50'].iloc[-1] if len(hist) >= 50 else np.nan
             sma200_val = hist['SMA200'].iloc[-1] if len(hist) >= 200 else np.nan
@@ -475,11 +447,11 @@ if ticker_input:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns(4)
                 with c1: st.metric(label="현재 주가", value=fmt_price(current_price), delta=f"{drawdown:.2f}% (최고가대비)")
-                with c2: st.metric(label=f"적정 주가 ({model_used})", value=fmt_price(final_fair_value) if final_fair_value != "N/A" else "N/A", 
+                with c2: st.metric(label=f"적정 주가 ({model_used})", value=fmt_price(final_fair_value), 
                                    delta=f"{margin_of_safety:.2f}% (안전마진)" if margin_of_safety != "N/A" else None,
                                    help="테크/성장주는 현금흐름할인(DCF) 모델로, 가치/배당주는 그레이엄 모델로 자동 산출됩니다.")
                 with c3: st.metric(label="1년 MDD (최대 낙폭)", value=f"{mdd:.2f}%", delta="Max Drawdown", delta_color="inverse")
-                with c4: st.metric(label="EPS (주당순이익)", value=fmt_price(eps) if eps else "N/A", 
+                with c4: st.metric(label="EPS (주당순이익)", value=fmt_price(eps), 
                                    help="1주당 회사가 벌어들인 순이익을 의미해요. 숫자가 클수록 회사의 기업 가치가 크고, 배당 줄 수 있는 여유가 늘어났다고 볼 수 있어요.")
                     
             with st.container(border=True):
@@ -501,11 +473,11 @@ if ticker_input:
                 if is_undervalued:
                     fund_color = "#3fb950"
                     fund_bg = "63, 185, 80"
-                    fund_desc += f"현재 주가({fmt_price(current_price)})는 {model_used}로 산출된 적정 주가({fmt_price(final_fair_value)}) 대비 **싸게(저평가)** 거래되고 있습니다. "
+                    fund_desc += f"현재 주가({fmt_price(current_price).split(' ')[0]})는 {model_used}로 산출된 적정 주가({fmt_price(final_fair_value).split(' ')[0]}) 대비 **싸게(저평가)** 거래되고 있습니다. "
                 else:
                     fund_color = "#f85149"
                     fund_bg = "248, 81, 73"
-                    fund_desc += f"현재 주가({fmt_price(current_price)})는 {model_used}로 산출된 적정 주가({fmt_price(final_fair_value)}) 대비 **비싸게(고평가)** 거래되고 있습니다. "
+                    fund_desc += f"현재 주가({fmt_price(current_price).split(' ')[0]})는 {model_used}로 산출된 적정 주가({fmt_price(final_fair_value).split(' ')[0]}) 대비 **비싸게(고평가)** 거래되고 있습니다. "
             else:
                 fund_desc += f"현재 적자 혹은 현금흐름 부족으로 인해 명확한 적정 주가를 산출하기 어렵습니다. "
                 
@@ -533,14 +505,13 @@ if ticker_input:
                 peg_val = f"{peg_ratio:.2f}배" if peg_ratio else "N/A"
                 peg_delta = ("저평가 구간" if peg_ratio and peg_ratio <= 1.0 else "고평가 구간") if peg_ratio else None
                 peg_help_text = "PER(주가수익비율)을 이익성장률로 나눈 값입니다. 보통 1.0 이하이면 기업의 미래 성장 속도에 비해 현재 주가가 싸다(저평가)고 판단합니다."
-                if peg_ratio is None: 
-                    peg_help_text += "\n\n🚨 [N/A 발생 이유]\n야후 파이낸스에 향후 5년 이익성장률 추정치가 누락되어 있거나 해당 기업이 적자 상태이기 때문입니다."
                 
                 fcf_val = "N/A"
                 if fcf is not None:
-                    fcf_conv = fcf * ex_rate if is_krw else fcf
-                    if is_krw: fcf_val = f"₩{fcf_conv/1e12:.2f}조" if fcf_conv >= 1e12 else (f"₩{fcf_conv/1e8:.2f}억" if fcf_conv >= 1e8 else f"₩{fcf_conv:,.0f}")
-                    else: fcf_val = f"${fcf/1e12:.2f}T" if fcf >= 1e12 else (f"${fcf/1e9:.2f}B" if fcf >= 1e9 else f"${fcf/1e6:.2f}M")
+                    fcf_usd = f"${fcf/1e12:.2f}T" if fcf >= 1e12 else (f"${fcf/1e9:.2f}B" if fcf >= 1e9 else f"${fcf/1e6:.2f}M")
+                    fcf_krw_val = fcf * ex_rate
+                    fcf_krw = f"₩{fcf_krw_val/1e12:.2f}조" if fcf_krw_val >= 1e12 else (f"₩{fcf_krw_val/1e8:.2f}억" if fcf_krw_val >= 1e8 else f"₩{fcf_krw_val:,.0f}")
+                    fcf_val = f"{fcf_usd} ({fcf_krw})"
                 
                 payout_val = f"{payout_ratio * 100:.1f}%" if payout_ratio else "N/A"
                 inst_val = f"{insider_pct * 100:.1f}%" if insider_pct else "N/A"
@@ -647,7 +618,6 @@ if ticker_input:
             st.markdown("### 4. 동종 업계 비교 (Peer Valuation)")
             
             if not peer_df.empty:
-                # 💡 동그라미 툴팁 마크다운 적용
                 q_mark = "<span style='display:inline-block; width:14px; height:14px; border:1.5px solid #8b949e; color:#8b949e; border-radius:50%; text-align:center; line-height:11px; font-size:10px; font-weight:bold; cursor:help; vertical-align:middle; margin-left:4px;' title='{0}'>?</span>"
                 table_html = "<table class='peer-table'><tr>" \
                              "<th>Ticker</th>" \
@@ -684,12 +654,6 @@ if ticker_input:
                 df_10y['Over_Top'] = np.maximum(df_10y['Price'], df_10y['Value'])
                 df_10y['Under_Bottom'] = np.minimum(df_10y['Price'], df_10y['Value'])
 
-                if is_krw:
-                    df_10y['Value'] *= ex_rate
-                    df_10y['Over_Top'] *= ex_rate
-                    df_10y['Under_Bottom'] *= ex_rate
-                    df_10y['Price'] *= ex_rate
-
                 fig_val = go.Figure()
                 fig_val.add_trace(go.Scatter(x=df_10y.index, y=df_10y['Value'], line=dict(width=0), showlegend=False, hoverinfo='skip'))
                 fig_val.add_trace(go.Scatter(x=df_10y.index, y=df_10y['Over_Top'], fill='tonexty', fillcolor='rgba(239, 83, 80, 0.3)', line=dict(width=0), showlegend=False, hoverinfo='skip'))
@@ -703,14 +667,12 @@ if ticker_input:
                     hovermode="x unified", height=550, margin=dict(l=0, r=0, t=50, b=0),
                     template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     xaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d'),
-                    yaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', tickprefix="₩" if is_krw else "$"),
+                    yaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', tickprefix="$"),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 with st.container(border=True): st.plotly_chart(fig_val, use_container_width=True)
 
             plot_hist_1y = hist_1y.copy()
-            if is_krw:
-                for col in ['Open', 'High', 'Low', 'Close', 'SMA50', 'SMA200']: plot_hist_1y[col] *= ex_rate
 
             st.markdown("<br>5. 최근 1년 주가 일봉 차트 & 세력 매집(OBV) 지표", unsafe_allow_html=True)
             
@@ -725,7 +687,7 @@ if ticker_input:
                 template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
-            fig.update_yaxes(title_text="주가 (" + ("₩" if is_krw else "$") + ")", showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', row=1, col=1)
+            fig.update_yaxes(title_text="주가 ($)", showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', row=1, col=1)
             fig.update_yaxes(title_text="OBV Volume", showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', row=2, col=1)
             fig.update_xaxes(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', rangeslider_visible=False)
             
@@ -771,8 +733,6 @@ if ticker_input:
                 
             if not df_wk.empty:
                 plot_df_wk = df_wk.copy()
-                if is_krw:
-                    for col in ['Open', 'High', 'Low', 'Close', 'MA10', 'MA20', 'MA60', 'MA120', 'ATR_Stop']: plot_df_wk[col] *= ex_rate
 
                 st.markdown("<br><br>6. 주봉차트 타점 발생기", unsafe_allow_html=True)
                 fig_wk = go.Figure()
@@ -795,7 +755,7 @@ if ticker_input:
                     xaxis_rangeslider_visible=False, height=650, margin=dict(l=0, r=0, t=10, b=0),
                     template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     xaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d'),
-                    yaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', tickprefix="₩" if is_krw else "$"),
+                    yaxis=dict(showgrid=True, gridcolor='#30363d', zerolinecolor='#30363d', side='right', tickprefix="$"),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 with st.container(border=True): st.plotly_chart(fig_wk, use_container_width=True)
