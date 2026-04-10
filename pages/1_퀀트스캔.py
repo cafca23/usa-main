@@ -7,7 +7,8 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import google.generativeai as genai
 import re
-import time 
+import time
+from finvizfinance.quote import finvizfinance # 💡 핀비즈 구원투수 등판!
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -36,6 +37,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 💡 [새로운 무기] 핀비즈의 문자열 데이터를 숫자로 변환하는 해독기
+def parse_fz(val, vtype='float'):
+    if not isinstance(val, str): return val
+    if val == '-' or val == 'N/A' or val == '': return None
+    val = val.replace(',', '')
+    try:
+        if vtype == 'percent': return float(val.replace('%', '')) / 100.0
+        elif vtype == 'large_num':
+            if 'B' in val: return float(val.replace('B', '')) * 1e9
+            if 'M' in val: return float(val.replace('M', '')) * 1e6
+            if 'K' in val: return float(val.replace('K', '')) * 1e3
+            return float(val)
+        else: return float(val)
+    except: return None
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_macro_data():
     try: usdkrw = yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1]
@@ -56,7 +72,7 @@ def get_dynamic_peers(ticker, name, sector):
         return clean_res
     except: return ""
 
-@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... 🐢") 
+@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... (Finviz 하이브리드 엔진 🐢)") 
 def get_peers_data(ticker, peer_str):
     peer_list = [p.strip().upper() for p in peer_str.split(",") if p.strip()]
     if ticker not in peer_list:
@@ -64,56 +80,63 @@ def get_peers_data(ticker, peer_str):
     data = []
     
     for p in peer_list:
-        for attempt in range(3): 
-            try:
-                # 💡 방탄조끼 1: info가 None일 경우 빈 딕셔너리({})로 대체
-                temp_info = yf.Ticker(p).info
-                info = temp_info if temp_info is not None else {}
-                
-                data.append({
-                    "Ticker": p,
-                    "Price": info.get("currentPrice", np.nan),
-                    "Fwd P/E": info.get("forwardPE", np.nan),
-                    "EV/EBITDA": info.get("enterpriseToEbitda", np.nan),
-                    "P/S": info.get("priceToSalesTrailing12Months", np.nan),
-                    "EV/Rev": info.get("enterpriseToRevenue", np.nan)
-                })
-                break 
-            except Exception as e:
-                if "429" in str(e) or "Rate" in str(e): time.sleep(2) 
-                else: break
+        info = {}
+        fund = {}
+        # 1. 야후 시도
+        try: info = yf.Ticker(p).info or {}
+        except: pass
+        # 2. 야후가 값을 안 주면 핀비즈 투입
+        if not info.get('forwardPE'):
+            try: fund = finvizfinance(p).ticker_fundament()
+            except: pass
+
+        fwd_pe = info.get("forwardPE") or parse_fz(fund.get('Forward P/E'))
+        ps = info.get("priceToSalesTrailing12Months") or parse_fz(fund.get('P/S'))
+        ev_ebitda = info.get("enterpriseToEbitda", np.nan)
+        ev_rev = info.get("enterpriseToRevenue", np.nan)
+        price = info.get("currentPrice") or parse_fz(fund.get('Price'))
+
+        data.append({
+            "Ticker": p,
+            "Price": price if price else np.nan,
+            "Fwd P/E": fwd_pe if fwd_pe else np.nan,
+            "EV/EBITDA": ev_ebitda if ev_ebitda else np.nan,
+            "P/S": ps if ps else np.nan,
+            "EV/Rev": ev_rev if ev_rev else np.nan
+        })
         time.sleep(0.5) 
         
     return pd.DataFrame(data)
 
-@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... 📡") 
+@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... (Finviz 하이브리드 융합 📡)") 
 def get_stock_market_data(ticker):
     stock = yf.Ticker(ticker)
+    
+    # 1. YF Info 가져오기
     info = {}
+    try: info = stock.info or {}
+    except: pass
+        
+    # 2. 💡 Finviz Fundamentals 가져오기 (야후가 누락한 데이터 100% 백업용)
+    fund_data = {}
+    try: fund_data = finvizfinance(ticker).ticker_fundament()
+    except: pass
     
-    # 1. Info 가져오기 (지능형 재시도 및 방탄조끼)
-    for attempt in range(3):
-        try:
-            # 💡 방탄조끼 2: info가 None일 경우 빈 딕셔너리({})로 대체
-            temp_info = stock.info
-            if temp_info is not None:
-                info = temp_info
-            break
-        except Exception as e:
-            if "429" in str(e) or "Rate" in str(e): time.sleep(2)
-            else: break
-            
-    time.sleep(0.5)
-    
-    # 2. History 가져오기 
+    # 3. YF Cash Flow (FCF 추출용)
+    fcf_yf = None
+    try:
+        cf = stock.cash_flow
+        if 'Free Cash Flow' in cf.index:
+            fcf_yf = float(cf.loc['Free Cash Flow'].iloc[0])
+    except: pass
+
+    # 4. 차트 데이터
     hist_daily_5y = pd.DataFrame()
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             hist_daily_5y = stock.history(period="5y", interval="1d")
             if not hist_daily_5y.empty: break
-        except Exception as e:
-            if "429" in str(e) or "Rate" in str(e): time.sleep(2)
-            else: break
+        except: time.sleep(1)
 
     hist = pd.DataFrame()
     hist_weekly = pd.DataFrame()
@@ -121,20 +144,15 @@ def get_stock_market_data(ticker):
     if not hist_daily_5y.empty:
         hist = hist_daily_5y.tail(504).copy()
         hist_weekly = hist_daily_5y.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
-        
-    time.sleep(0.5)
 
-    # 3. 10년치 월봉 데이터 가져오기
     hist_10y = pd.DataFrame()
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             hist_10y = stock.history(period="10y", interval="1mo")
             if not hist_10y.empty: break
-        except Exception as e:
-            if "429" in str(e) or "Rate" in str(e): time.sleep(2)
-            else: break
+        except: time.sleep(1)
             
-    return info, hist, hist_10y, hist_weekly
+    return info, fund_data, fcf_yf, hist, hist_10y, hist_weekly
 
 # ==============================================================
 
@@ -167,7 +185,7 @@ US_TICKER_MAP = {
 
 with st.sidebar:
     st.markdown("### ⚙️ 분석 설정")
-    raw_input = st.text_input("종목 티커 검색", value="aapl")
+    raw_input = st.text_input("종목 티커 또는 한글명 입력 (예: AAPL, 애플, 마소)", value="애플")
     search_term = raw_input.strip()
     ticker_input = US_TICKER_MAP.get(search_term, search_term).upper()
     
@@ -186,7 +204,7 @@ with st.sidebar:
     if ticker_input:
         ticker_for_sidebar = ticker_input
         try:
-            info_sb, _, _, _ = get_stock_market_data(ticker_for_sidebar)
+            info_sb, _, _, _, _, _ = get_stock_market_data(ticker_for_sidebar)
             if ticker_for_sidebar in PEER_MAP:
                 default_peers = PEER_MAP[ticker_for_sidebar]
             else:
@@ -275,10 +293,10 @@ with col_header1:
 if ticker_input:
     ticker = ticker_input
     try:
-        info, hist, hist_10y, hist_weekly = get_stock_market_data(ticker)
+        info, fund_data, fcf_yf, hist, hist_10y, hist_weekly = get_stock_market_data(ticker)
         
         if hist.empty or len(hist) < 20:
-            st.error(f"[{ticker}] 데이터를 야후 파이낸스에서 불러오지 못했습니다. 잠시 후 다시 시도해 주시거나 티커를 확인해 주세요.")
+            st.error(f"[{ticker}] 차트 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주시거나 티커를 확인해 주세요.")
         else:
             hist['SMA50'] = hist['Close'].rolling(window=50).mean()
             hist['SMA200'] = hist['Close'].rolling(window=200).mean()
@@ -289,31 +307,36 @@ if ticker_input:
             hist['RSI'] = 100 - (100 / (1 + rs))
             hist['OBV'] = (np.sign(hist['Close'].diff()) * hist['Volume']).fillna(0).cumsum()
 
-            # 💡 info가 비어있어도, 차트 데이터(hist)에서 알아서 값을 찾아오도록 완벽 연동
-            current_price = info.get('currentPrice', hist['Close'].iloc[-1]) if isinstance(info, dict) else hist['Close'].iloc[-1]
+            # 💡 [하이브리드 교차 데이터 추출] 야후 실패 시 핀비즈 출동
+            current_price = info.get('currentPrice') or parse_fz(fund_data.get('Price')) or hist['Close'].iloc[-1]
             sma50_val = hist['SMA50'].iloc[-1] if len(hist) >= 50 else np.nan
             sma200_val = hist['SMA200'].iloc[-1] if len(hist) >= 200 else np.nan
             rsi_val = hist['RSI'].iloc[-1]
             
-            eps = info.get('trailingEps', info.get('forwardEps', 0))
-            pbr = info.get('priceToBook', 'N/A')
-            roe = info.get('returnOnEquity', None)
-            debt_to_equity = info.get('debtToEquity', None)
-            peg_ratio = info.get('pegRatio', None)
-            fcf = info.get('freeCashflow', None)
-            payout_ratio = info.get('payoutRatio', 0) if info.get('payoutRatio') else 0
-            shares = info.get('sharesOutstanding', None)
+            eps = info.get('trailingEps') or parse_fz(fund_data.get('EPS (ttm)'))
+            pbr = info.get('priceToBook') or parse_fz(fund_data.get('P/B'))
+            roe = info.get('returnOnEquity') or parse_fz(fund_data.get('ROE'), 'percent')
+            
+            de_yf = info.get('debtToEquity')
+            de_fz = parse_fz(fund_data.get('Debt/Eq'))
+            debt_to_equity = de_yf if de_yf is not None else (de_fz * 100 if de_fz is not None else None)
+            
+            peg_ratio = info.get('pegRatio') or parse_fz(fund_data.get('PEG'))
+            fcf = fcf_yf if fcf_yf is not None else info.get('freeCashflow')
+            payout_ratio = info.get('payoutRatio') or parse_fz(fund_data.get('Payout'), 'percent') or 0
+            shares = info.get('sharesOutstanding') or parse_fz(fund_data.get('Shs Outstand'), 'large_num')
+            
             sector = str(info.get('sector', '')).lower()
             industry = str(info.get('industry', '')).lower()
             
             ev_ebitda = info.get('enterpriseToEbitda', None)
-            ps_ratio = info.get('priceToSalesTrailing12Months', None)
+            ps_ratio = info.get('priceToSalesTrailing12Months') or parse_fz(fund_data.get('P/S'))
             ev_revenue = info.get('enterpriseToRevenue', None)
-            forward_pe = info.get('forwardPE', None)
+            forward_pe = info.get('forwardPE') or parse_fz(fund_data.get('Forward P/E'))
             
-            short_pct = info.get('shortPercentOfFloat', None)
-            insider_pct = info.get('heldPercentInsiders', None)
-            earnings_growth = info.get('earningsGrowth', None)
+            short_pct = info.get('shortPercentOfFloat') or parse_fz(fund_data.get('Short Float'), 'percent')
+            insider_pct = info.get('heldPercentInsiders') or parse_fz(fund_data.get('Insider Own'), 'percent')
+            earnings_growth = info.get('earningsGrowth') or parse_fz(fund_data.get('EPS next Y'), 'percent')
             
             is_main_value_stock = False
             value_sectors = ["consumer defensive", "utilities", "energy", "real estate", "financial services", "basic materials", "industrials"]
@@ -328,7 +351,7 @@ if ticker_input:
             if eps is not None and eps > 0: graham_value = eps * (8.5 + 2 * g)
                 
             dcf_value = "N/A"
-            if fcf is not None and fcf > 0 and shares is not None:
+            if fcf is not None and fcf > 0 and shares is not None and shares > 0:
                 wacc = discount_rate / 100
                 g_dec = g / 100
                 term_g = 0.025 
@@ -347,7 +370,7 @@ if ticker_input:
                 badge_html = "<div class='badge badge-value'>🏛️ AI 판독: 전통 가치/배당주 트랙 자동 적용 중</div>"
                 
             margin_of_safety = "N/A"
-            if final_fair_value != "N/A":
+            if final_fair_value != "N/A" and current_price is not None:
                 margin_of_safety = ((final_fair_value - current_price) / abs(final_fair_value)) * 100
 
             hist_1y = hist.tail(252).copy()
@@ -420,7 +443,7 @@ if ticker_input:
             
             st.markdown(f"""
 <div class="banner {banner_class}">
-    <h2>{info.get('shortName', ticker)} ({ticker})</h2>
+    <h2>{info.get('shortName', ticker) or ticker} ({ticker})</h2>
     <p>퀀트 평가 등급: <b style="font-size:1.3rem;">{judgment}</b> &nbsp;|&nbsp; 스코어 : <b>{score} 점</b> </p>
 </div>
 """, unsafe_allow_html=True)
@@ -520,12 +543,12 @@ if ticker_input:
                     else: fcf_val = f"${fcf/1e12:.2f}T" if fcf >= 1e12 else (f"${fcf/1e9:.2f}B" if fcf >= 1e9 else f"${fcf/1e6:.2f}M")
                 
                 payout_val = f"{payout_ratio * 100:.1f}%" if payout_ratio else "N/A"
-                inst_val = f"{info.get('heldPercentInstitutions', 0) * 100:.1f}%" if info.get('heldPercentInstitutions') else "N/A"
+                inst_val = f"{insider_pct * 100:.1f}%" if insider_pct else "N/A"
 
                 with pc1: st.metric(label="PEG Ratio (성장성 대비 가치)", value=peg_val, delta=peg_delta, delta_color="normal" if peg_ratio and peg_ratio <= 1.0 else "inverse", help=peg_help_text)
                 with pc2: st.metric(label="Free Cash Flow (잉여현금흐름)", value=fcf_val, delta="현금창출 긍정적" if fcf and fcf > 0 else "우려", delta_color="normal" if fcf and fcf > 0 else "inverse", help="회사가 필수적인 투자를 다 하고도 통장에 남는 순수한 잉여 여윳돈입니다. 이 돈으로 배당을 주거나 빚을 갚을 수 있어 아주 중요합니다.")
                 with pc3: st.metric(label="Payout Ratio (배당 성향)", value=payout_val, delta="건전" if payout_ratio and payout_ratio <= 0.6 else "과부하 우려", delta_color="normal" if payout_ratio and payout_ratio <= 0.6 else "inverse", help="순이익 중 주주들에게 배당금으로 나눠주는 비율입니다. 너무 높으면 미래 투자가 어렵고 배당 삭감 위험이 있습니다.")
-                with pc4: st.metric(label="Inst. Ownership (기관 보유율)", value=inst_val, help="월가 기관 투자자(헤지펀드, 연기금 등)들이 이 회사 주식을 얼마나 쥐고 있는지를 나타냅니다. 50% 이상이면 주도적 매수세가 있다고 봅니다.")
+                with pc4: st.metric(label="Inst. Ownership (기관 보유율)", value=f"{info.get('heldPercentInstitutions', 0) * 100:.1f}%" if info.get('heldPercentInstitutions') else "N/A", help="월가 기관 투자자(헤지펀드, 연기금 등)들이 이 회사 주식을 얼마나 쥐고 있는지를 나타냅니다. 50% 이상이면 주도적 매수세가 있다고 봅니다.")
                 
                 st.markdown("<hr style='margin: 15px 0; border-color: #30363d;'>", unsafe_allow_html=True)
                 st.markdown("<p style='color:#8b949e; font-weight:bold; margin-bottom:10px;'>🔍 알파 스프레드 기반 상대가치 지표 (Relative Valuation Multiples)</p>", unsafe_allow_html=True)
