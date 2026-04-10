@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import google.generativeai as genai
 import re
-import time # 💡 딜레이(Sleep)를 위한 모듈 추가
+import time 
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -36,10 +36,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==============================================================
-# 💡 [핵심 최적화 V4.7] 스마트 딜레이 & API 호출 최소화 엔진
-# ==============================================================
-
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_macro_data():
     try: usdkrw = yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1]
@@ -60,18 +56,20 @@ def get_dynamic_peers(ticker, name, sector):
         return clean_res
     except: return ""
 
-@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... (스텔스 모드 가동 🐢)") 
+@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... 🐢") 
 def get_peers_data(ticker, peer_str):
     peer_list = [p.strip().upper() for p in peer_str.split(",") if p.strip()]
     if ticker not in peer_list:
         peer_list = [ticker] + peer_list
     data = []
     
-    # 경쟁사 1개당 1번씩 찌를 때마다 0.5초씩 숨을 고릅니다. (Rate limit 회피)
     for p in peer_list:
-        for attempt in range(3): # 최대 3번 재시도
+        for attempt in range(3): 
             try:
-                info = yf.Ticker(p).info
+                # 💡 방탄조끼 1: info가 None일 경우 빈 딕셔너리({})로 대체
+                temp_info = yf.Ticker(p).info
+                info = temp_info if temp_info is not None else {}
+                
                 data.append({
                     "Ticker": p,
                     "Price": info.get("currentPrice", np.nan),
@@ -80,23 +78,26 @@ def get_peers_data(ticker, peer_str):
                     "P/S": info.get("priceToSalesTrailing12Months", np.nan),
                     "EV/Rev": info.get("enterpriseToRevenue", np.nan)
                 })
-                break # 성공하면 반복문 탈출
+                break 
             except Exception as e:
-                if "429" in str(e) or "Rate" in str(e): time.sleep(2) # 차단 시 2초 대기 후 재시도
+                if "429" in str(e) or "Rate" in str(e): time.sleep(2) 
                 else: break
-        time.sleep(0.5) # 정상 처리 후에도 0.5초 대기
+        time.sleep(0.5) 
         
     return pd.DataFrame(data)
 
-@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... (데이터 최적화 스캔 중 📡)") 
+@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... 📡") 
 def get_stock_market_data(ticker):
     stock = yf.Ticker(ticker)
     info = {}
     
-    # 1. Info 가져오기 (지능형 재시도)
+    # 1. Info 가져오기 (지능형 재시도 및 방탄조끼)
     for attempt in range(3):
         try:
-            info = stock.info
+            # 💡 방탄조끼 2: info가 None일 경우 빈 딕셔너리({})로 대체
+            temp_info = stock.info
+            if temp_info is not None:
+                info = temp_info
             break
         except Exception as e:
             if "429" in str(e) or "Rate" in str(e): time.sleep(2)
@@ -104,11 +105,10 @@ def get_stock_market_data(ticker):
             
     time.sleep(0.5)
     
-    # 2. History 가져오기 (호출 횟수 절반으로 최적화!)
+    # 2. History 가져오기 
     hist_daily_5y = pd.DataFrame()
     for attempt in range(3):
         try:
-            # 5년치 일봉 데이터 한 번만 호출해서 다 뽑아냅니다.
             hist_daily_5y = stock.history(period="5y", interval="1d")
             if not hist_daily_5y.empty: break
         except Exception as e:
@@ -119,9 +119,7 @@ def get_stock_market_data(ticker):
     hist_weekly = pd.DataFrame()
     
     if not hist_daily_5y.empty:
-        # 5년치 데이터에서 마지막 504일(약 2년)치만 잘라서 hist에 저장 (추가 호출 방지)
         hist = hist_daily_5y.tail(504).copy()
-        # 일봉 데이터를 주봉으로 자체 변환 (추가 호출 방지)
         hist_weekly = hist_daily_5y.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
         
     time.sleep(0.5)
@@ -280,7 +278,7 @@ if ticker_input:
         info, hist, hist_10y, hist_weekly = get_stock_market_data(ticker)
         
         if hist.empty or len(hist) < 20:
-            st.error(f"[{ticker}] 데이터를 야후 파이낸스에서 불러오지 못했습니다. 잠시 후 다시 시도해 주시거나 티커를 확인해 주세요. (Rate Limit이 걸렸을 경우 5분 뒤 자동으로 해제됩니다.)")
+            st.error(f"[{ticker}] 데이터를 야후 파이낸스에서 불러오지 못했습니다. 잠시 후 다시 시도해 주시거나 티커를 확인해 주세요.")
         else:
             hist['SMA50'] = hist['Close'].rolling(window=50).mean()
             hist['SMA200'] = hist['Close'].rolling(window=200).mean()
@@ -291,7 +289,8 @@ if ticker_input:
             hist['RSI'] = 100 - (100 / (1 + rs))
             hist['OBV'] = (np.sign(hist['Close'].diff()) * hist['Volume']).fillna(0).cumsum()
 
-            current_price = info.get('currentPrice', hist['Close'].iloc[-1])
+            # 💡 info가 비어있어도, 차트 데이터(hist)에서 알아서 값을 찾아오도록 완벽 연동
+            current_price = info.get('currentPrice', hist['Close'].iloc[-1]) if isinstance(info, dict) else hist['Close'].iloc[-1]
             sma50_val = hist['SMA50'].iloc[-1] if len(hist) >= 50 else np.nan
             sma200_val = hist['SMA200'].iloc[-1] if len(hist) >= 200 else np.nan
             rsi_val = hist['RSI'].iloc[-1]
