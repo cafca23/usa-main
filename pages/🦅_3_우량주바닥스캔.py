@@ -58,14 +58,13 @@ def get_ai_commentary_sniper(ticker, company, sector, eng_desc, api_key):
     
     # 💡 [V4.0 핵심] 야후 파이낸스에서 실시간 뉴스 헤드라인 스크래핑
     try:
-        news_data = yf.Ticker(ticker).news[:5] # 최신 뉴스 5개 가져오기
+        news_data = yf.Ticker(ticker).news[:5] 
         recent_news = "\n".join([f"- {n['title']}" for n in news_data]) if news_data else "최근 주요 뉴스 없음"
     except:
         recent_news = "뉴스 검색 실패"
 
     model = genai.GenerativeModel(target_model) 
     
-    # 💡 가치 트랩 판독 전용 프롬프트
     prompt = f"""
     너는 워런 버핏과 찰리 멍거 수준의 통찰력을 가진 월스트리트 가치투자 애널리스트야.
     이 기업은 재무 숫자는 튼튼하지만, 최근 고점 대비 -50% 이상 크게 폭락했어. 
@@ -117,7 +116,8 @@ st.divider()
 with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
     try:
         foverview = Overview()
-        desc = "🩸 **[피가 낭자할 때 사라 (낙폭과대 우량주)]**\n\n시가총액 20억 달러 이상, 고점 대비 절반(-50%) 이하 폭락, 부채비율 1 이하의 흑자 기업입니다. **(시가총액 내림차순)**"
+        # 💡 [요청사항 적용 1] 시가총액 원화 환산 텍스트 추가
+        desc = "🩸 **[피가 낭자할 때 사라 (낙폭과대 우량주)]**\n\n시가총액 20억 달러(약 2조 8,000억원) 이상, 고점 대비 절반(-50%) 이하 폭락, 부채비율 1 이하의 흑자 기업입니다. **(시가총액 내림차순)**"
         filters_dict = {'Market Cap.': '+Mid (over $2bln)', '52-Week High/Low': '50% or more below High', 'Debt/Equity': 'Under 1', 'Operating Margin': 'Positive (>0%)', 'Average Volume': 'Over 500K'}
         foverview.set_filter(filters_dict=filters_dict)
         df = foverview.screener_view()
@@ -131,15 +131,58 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
             st.info(desc)
             
             res_df = df[['🏆 랭킹', 'Ticker', 'Company', 'Sector', 'Industry', 'Market Cap', 'P/E', 'Price', 'Volume']].copy()
-            st.dataframe(res_df, width='stretch', hide_index=True)
+            
+            # 💡 [요청사항 적용 2] 값 포맷팅 적용 함수 (달러, 원화, 콤마, 단위 등)
+            def format_mcap(val):
+                try:
+                    v = float(val)
+                    usd_str = f"${v:,.0f}" 
+                    krw_val = v * 1400     # 환율 1400원 기준 임의 적용
+                    if krw_val >= 1_000_000_000_000: krw_str = f"(약 {krw_val / 1_000_000_000_000:.1f}조원)"
+                    elif krw_val >= 100_000_000: krw_str = f"(약 {krw_val / 100_000_000:.0f}억원)"
+                    else: krw_str = f"(약 {krw_val:,.0f}원)"
+                    return f"{usd_str} {krw_str}"
+                except:
+                    return val
+
+            res_df['Market Cap'] = res_df['Market Cap'].apply(format_mcap)
+            res_df['Price'] = res_df['Price'].apply(lambda x: f"${float(x):,.2f}" if pd.notna(x) else x)
+            res_df['Volume'] = res_df['Volume'].apply(lambda x: f"{float(x):,.0f}주" if pd.notna(x) else x)
+            res_df['P/E'] = res_df['P/E'].apply(lambda x: f"{float(x):.1f}배" if pd.notna(x) else "N/A (적자)")
+
+            # 💡 [요청사항 적용 3] 컬럼명 한글화
+            res_df = res_df.rename(columns={
+                'Ticker': '종목코드', 'Company': '회사명', 'Sector': '섹터(업종)', 
+                'Industry': '세부산업', 'Market Cap': '시가총액', 
+                'P/E': 'PER (저평가 지수)', 'Price': '현재가', 'Volume': '거래량'
+            })
+
+            # 💡 [요청사항 적용 4] column_config를 활용하여 컬럼 헤더에 툴팁(도움말 물음표) 추가
+            st.dataframe(
+                res_df, 
+                width='stretch', 
+                hide_index=True,
+                column_config={
+                    "종목코드": st.column_config.TextColumn("종목코드", help="미국 증시에 상장된 고유 티커(알파벳)입니다."),
+                    "회사명": st.column_config.TextColumn("회사명", help="해당 기업의 공식 영문 명칭입니다."),
+                    "섹터(업종)": st.column_config.TextColumn("섹터(업종)", help="기업이 속한 대분류 산업군입니다. (예: 테크, 헬스케어 등)"),
+                    "세부산업": st.column_config.TextColumn("세부산업", help="기업이 속한 소분류 세부 비즈니스 영역입니다."),
+                    "시가총액": st.column_config.TextColumn("시가총액", help="기업의 전체 덩치(발행주식수 × 주가)입니다. 괄호 안은 원화 환산 추정치입니다."),
+                    "PER (저평가 지수)": st.column_config.TextColumn("PER (저평가 지수)", help="주가수익비율. 1주당 순이익 대비 주가가 몇 배로 거래되는지 나타냅니다."),
+                    "현재가": st.column_config.TextColumn("현재가", help="현재 거래되는 주식의 1주당 가격(달러)입니다."),
+                    "거래량": st.column_config.TextColumn("거래량", help="최근 하루 동안 거래된 주식의 총 수량입니다.")
+                }
+            )
 
             st.divider()
             st.subheader("🎯 딥밸류 타점 조준 (AI 브리핑 ➔ 차트 ➔ MDD 계산기)")
-            sel_opt = st.selectbox("정밀 분석할 타깃을 선택하세요:", [f"{t} ({c})" for t, c in zip(res_df['Ticker'], res_df['Company'])])
+            
+            # 리스트박스에 표시할 때 영문 컬럼명이 아닌 한글 컬럼명으로 수정 매핑
+            sel_opt = st.selectbox("정밀 분석할 타깃을 선택하세요:", [f"{t} ({c})" for t, c in zip(res_df['종목코드'], res_df['회사명'])])
             
             if sel_opt:
                 t_tkr = sel_opt.split(" ")[0]
-                t_idx = res_df['Ticker'].tolist().index(t_tkr)
+                t_idx = res_df['종목코드'].tolist().index(t_tkr)
                 
                 # --- 1. AI 비즈니스 & 턴어라운드 브리핑 ---
                 with st.spinner("비즈니스 모델 해독 및 실시간 뉴스 기반 가치 트랩 분석 중..."):
@@ -150,7 +193,7 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
                         
                         if api_key:
                             st.markdown(f"#### 🤖 퀀트 AI 가치 트랩 판독 리포트")
-                            try: st.success(get_ai_commentary_sniper(t_tkr, res_df['Company'].iloc[t_idx], res_df['Sector'].iloc[t_idx], eng_desc, api_key))
+                            try: st.success(get_ai_commentary_sniper(t_tkr, res_df['회사명'].iloc[t_idx], res_df['섹터(업종)'].iloc[t_idx], eng_desc, api_key))
                             except Exception as e: st.error(f"⚠️ 오류: {e}")
                     except Exception as e:
                         st.error("기업 정보를 불러오는 데 실패했습니다.")
@@ -162,7 +205,6 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
                         if not sd.empty:
                             sd['MA20'], sd['MA60'], sd['MA120'], sd['MA200'] = sd['Close'].rolling(20).mean(), sd['Close'].rolling(60).mean(), sd['Close'].rolling(120).mean(), sd['Close'].rolling(200).mean()
                             
-                            # 💡 [V3.1 패치] 차트 색상 한국형(상승 빨강, 하락 파랑)으로 변경
                             fig = go.Figure(data=[go.Candlestick(
                                 x=sd.index, open=sd['Open'], high=sd['High'], low=sd['Low'], close=sd['Close'], name="주가",
                                 increasing_line_color='red', increasing_fillcolor='red',   
@@ -171,8 +213,6 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
                             
                             fig.add_trace(go.Scatter(x=sd.index, y=sd['MA20'], line=dict(color='green', width=1.5, dash='dot'), name='20주선'))
                             fig.add_trace(go.Scatter(x=sd.index, y=sd['MA60'], line=dict(color='blue', width=2), name='60주선'))
-                            
-                            # 💡 [V3.1 패치] 120주선을 가시성 높은 노랑색으로 변경
                             fig.add_trace(go.Scatter(x=sd.index, y=sd['MA120'], line=dict(color='yellow', width=3), name='120주선 (경기바닥선)'))
                             fig.add_trace(go.Scatter(x=sd.index, y=sd['MA200'], line=dict(color='white', width=3), name='200주선 (최후지옥선)'))
                             fig.update_layout(title=f"📊 {t_tkr} 장기 주봉 차트 (딥밸류 스나이핑)", xaxis_rangeslider_visible=False, height=600)
@@ -219,7 +259,6 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
                                 
                                 t_df = pd.DataFrame(t_data)
                                 
-                                # 💡 [V3.1 패치] '진입' 단어가 포함된 행 전체를 시각적 초록색으로 하이라이트
                                 def highlight_target(row):
                                     if "진입" in row['상태']:
                                         return ['background-color: #00FF00; color: black; font-weight: bold;'] * len(row)
