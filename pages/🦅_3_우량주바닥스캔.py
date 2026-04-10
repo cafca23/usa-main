@@ -56,7 +56,6 @@ def get_ai_commentary_sniper(ticker, company, sector, eng_desc, api_key):
     target_model, err = get_dynamic_ai_model(api_key)
     if err: return err
     
-    # 💡 [V4.0 핵심] 야후 파이낸스에서 실시간 뉴스 헤드라인 스크래핑
     try:
         news_data = yf.Ticker(ticker).news[:5] 
         recent_news = "\n".join([f"- {n['title']}" for n in news_data]) if news_data else "최근 주요 뉴스 없음"
@@ -116,7 +115,6 @@ st.divider()
 with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
     try:
         foverview = Overview()
-        # 💡 [요청사항 적용 1] 시가총액 원화 환산 텍스트 추가
         desc = "🩸 **[피가 낭자할 때 사라 (낙폭과대 우량주)]**\n\n시가총액 20억 달러(약 2조 8,000억원) 이상, 고점 대비 절반(-50%) 이하 폭락, 부채비율 1 이하의 흑자 기업입니다. **(시가총액 내림차순)**"
         filters_dict = {'Market Cap.': '+Mid (over $2bln)', '52-Week High/Low': '50% or more below High', 'Debt/Equity': 'Under 1', 'Operating Margin': 'Positive (>0%)', 'Average Volume': 'Over 500K'}
         foverview.set_filter(filters_dict=filters_dict)
@@ -132,12 +130,11 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
             
             res_df = df[['🏆 랭킹', 'Ticker', 'Company', 'Sector', 'Industry', 'Market Cap', 'P/E', 'Price', 'Volume']].copy()
             
-            # 💡 [요청사항 적용 2] 값 포맷팅 적용 함수 (달러, 원화, 콤마, 단위 등)
             def format_mcap(val):
                 try:
                     v = float(val)
                     usd_str = f"${v:,.0f}" 
-                    krw_val = v * 1400     # 환율 1400원 기준 임의 적용
+                    krw_val = v * 1400     
                     if krw_val >= 1_000_000_000_000: krw_str = f"(약 {krw_val / 1_000_000_000_000:.1f}조원)"
                     elif krw_val >= 100_000_000: krw_str = f"(약 {krw_val / 100_000_000:.0f}억원)"
                     else: krw_str = f"(약 {krw_val:,.0f}원)"
@@ -150,16 +147,20 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
             res_df['Volume'] = res_df['Volume'].apply(lambda x: f"{float(x):,.0f}주" if pd.notna(x) else x)
             res_df['P/E'] = res_df['P/E'].apply(lambda x: f"{float(x):.1f}배" if pd.notna(x) else "N/A (적자)")
 
-            # 💡 [요청사항 적용 3] 컬럼명 한글화
             res_df = res_df.rename(columns={
                 'Ticker': '종목코드', 'Company': '회사명', 'Sector': '섹터(업종)', 
                 'Industry': '세부산업', 'Market Cap': '시가총액', 
                 'P/E': 'PER (저평가 지수)', 'Price': '현재가', 'Volume': '거래량'
             })
 
-            # 💡 [요청사항 적용 4] column_config를 활용하여 컬럼 헤더에 툴팁(도움말 물음표) 추가
+            # 💡 [핵심 패치] 데이터프레임 스타일러를 이용해 숫자 컬럼들만 우측 정렬 강제 적용
+            styled_df = res_df.style.set_properties(
+                subset=['시가총액', 'PER (저평가 지수)', '현재가', '거래량'], 
+                **{'text-align': 'right'}
+            )
+
             st.dataframe(
-                res_df, 
+                styled_df, 
                 width='stretch', 
                 hide_index=True,
                 column_config={
@@ -177,7 +178,6 @@ with st.spinner('월가 낙폭과대 딥밸류 종목 스캔 중...'):
             st.divider()
             st.subheader("🎯 딥밸류 타점 조준 (AI 브리핑 ➔ 차트 ➔ MDD 계산기)")
             
-            # 리스트박스에 표시할 때 영문 컬럼명이 아닌 한글 컬럼명으로 수정 매핑
             sel_opt = st.selectbox("정밀 분석할 타깃을 선택하세요:", [f"{t} ({c})" for t, c in zip(res_df['종목코드'], res_df['회사명'])])
             
             if sel_opt:
