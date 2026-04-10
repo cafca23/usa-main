@@ -185,7 +185,7 @@ US_TICKER_MAP = {
 
 with st.sidebar:
     st.markdown("### ⚙️ 분석 설정")
-    raw_input = st.text_input("종목 티커 또는 한글명 입력 (예: AAPL, 애플, 마소)", value="애플")
+    raw_input = st.text_input("종목 티커로 검색하세요", value="AAPL")
     search_term = raw_input.strip()
     ticker_input = US_TICKER_MAP.get(search_term, search_term).upper()
     
