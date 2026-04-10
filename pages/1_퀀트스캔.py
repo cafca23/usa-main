@@ -38,10 +38,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 💡 [핵심 엔진] 미국 증권거래위원회(SEC) 1만개 티커 실시간 스크래핑
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_all_us_tickers():
-    # SEC에 잡히지 않는 유명 레버리지/인버스 ETF 수동 추가
     etf_list = [
         "SPY (SPDR S&P 500 ETF Trust)", "QQQ (Invesco QQQ Trust)", "DIA (SPDR Dow Jones Industrial Average ETF)",
         "TQQQ (ProShares UltraPro QQQ)", "SQQQ (ProShares UltraPro Short QQQ)", "SOXX (iShares Semiconductor ETF)",
@@ -56,14 +54,12 @@ def get_all_us_tickers():
     tickers = []
     try:
         url = "https://www.sec.gov/files/company_tickers.json"
-        # SEC 방어벽 우회를 위한 특수 헤더
         headers = {"User-Agent": "AntRichQuantBot/1.0 (antrichquant@google.com)"}
         res = requests.get(url, headers=headers, timeout=5)
         data = res.json()
         for v in data.values():
             tickers.append(f"{v['ticker']} ({v['title'].title()})")
-    except:
-        pass
+    except: pass
     
     top_stocks = ["AAPL (Apple Inc.)", "MSFT (Microsoft Corp)", "NVDA (NVIDIA Corp)", "TSLA (Tesla Inc.)", "AMZN (Amazon.com Inc.)", "GOOGL (Alphabet Inc.)", "META (Meta Platforms Inc.)"]
     combined = top_stocks + etf_list + tickers
@@ -193,23 +189,43 @@ PEER_MAP = {
     "AMZN": "WMT, TGT, GOOGL", "META": "GOOGL, SNAP, PINS", "AMD": "NVDA, INTC, QCOM"
 }
 
+# 💡 전체 티커 리스트 미리 로드
+all_tickers_list = get_all_us_tickers()
+
+# 💡 Session State 초기화 (선택된 타깃 기억용)
+if "target_ticker" not in st.session_state:
+    st.session_state.target_ticker = "AAPL"
+
+# 💡 검색창 변경 감지 콜백 함수
+def handle_search():
+    val = st.session_state.search_dropdown
+    if val and val not in ["🔍 종목을 검색/선택하세요...", "➕ 직접 티커 수동 입력..."]:
+        # 선택한 티커를 메모리에 저장
+        st.session_state.target_ticker = val.split(" ")[0].upper()
+        # 검색창은 다시 빈칸(안내문구)으로 초기화!
+        st.session_state.search_dropdown = "🔍 종목을 검색/선택하세요..."
+
 with st.sidebar:
     st.markdown("### ⚙️ 분석 설정")
     
-    # 💡 [핵심] 1만개 이상의 자동완성 티커 리스트 연동
-    all_tickers_list = get_all_us_tickers()
-    selected_option = st.selectbox(
+    # 💡 1. 자동 초기화되는 스마트 검색창
+    st.selectbox(
         "🔍 종목 검색 (알파벳을 치면 자동완성 됨)", 
-        ["➕ 직접 티커 수동 입력..."] + all_tickers_list, 
-        index=1,
-        help="여기에 티커(TSL 등)를 치면 관련 주식/ETF 목록이 나타납니다."
+        ["🔍 종목을 검색/선택하세요...", "➕ 직접 티커 수동 입력..."] + all_tickers_list, 
+        key="search_dropdown",
+        on_change=handle_search,
+        help="종목을 선택하면 자동으로 스캔이 시작되며, 검색창은 다음 검색을 위해 비워집니다."
     )
     
-    if selected_option == "➕ 직접 티커 수동 입력...":
-        raw_input = st.text_input("티커를 정확히 입력하세요 (예: SOXL, TSLA)")
-        ticker_input = raw_input.strip().upper()
-    else:
-        ticker_input = selected_option.split(" ")[0].upper()
+    if st.session_state.search_dropdown == "➕ 직접 티커 수동 입력...":
+        manual_input = st.text_input("티커를 정확히 입력하고 엔터를 치세요 (예: SOXL)")
+        if manual_input:
+            st.session_state.target_ticker = manual_input.strip().upper()
+            
+    ticker_input = st.session_state.target_ticker
+    
+    # 💡 현재 분석 중인 타깃을 명확하게 표시
+    st.success(f"🎯 현재 분석 타깃: **{ticker_input}**")
     
     st.divider()
     
@@ -227,9 +243,9 @@ with st.sidebar:
             if ticker_for_sidebar in PEER_MAP:
                 default_peers = PEER_MAP[ticker_for_sidebar]
             else:
-                company_name = info_sb.get('shortName', ticker_for_sidebar)
-                sector = info_sb.get('sector', '')
-                ai_peers = get_dynamic_peers(ticker_for_sidebar, company_name, sector)
+                company_name_sb = info_sb.get('shortName', ticker_for_sidebar)
+                sector_sb_str = info_sb.get('sector', '')
+                ai_peers = get_dynamic_peers(ticker_for_sidebar, company_name_sb, sector_sb_str)
                 if ai_peers: default_peers = ai_peers
             
             roe_sb = info_sb.get('returnOnEquity', 0)
@@ -261,10 +277,10 @@ with st.sidebar:
 
     peer_input = st.text_input("경쟁사 티커 (쉼표로 구분)", value=default_peers, help="AI가 자동으로 찾아낸 경쟁사입니다. 직접 수정하셔도 됩니다.")
 
-    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_dual':
+    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_reset':
         st.session_state.g_slider = default_g
         st.session_state.last_ticker = ticker_input
-        st.session_state.app_version = 'v_final_dual'
+        st.session_state.app_version = 'v_final_reset'
         
     st.divider()
     
@@ -290,7 +306,6 @@ with st.sidebar:
     st.button("🔄 SGR 기반 (AI추천)", on_click=set_g, args=(default_g,), width="stretch")
     st.caption(sgr_caption)
 
-# 💡 [핵심] 원화/달러 듀얼 표기 함수
 def fmt_price(val):
     if pd.isna(val) or val == "N/A" or val is None or val == 0: return "N/A"
     try:
@@ -365,6 +380,23 @@ if ticker_input:
             insider_pct = info.get('heldPercentInsiders') or parse_fz(fund_data.get('Insider Own'), 'percent')
             earnings_growth = info.get('earningsGrowth') or parse_fz(fund_data.get('EPS next Y'), 'percent')
             
+            # 💡 2. 3중 교차 검증을 통한 진짜 '회사 풀네임' 추출 엔진
+            company_name = fund_data.get('Company')
+            if not company_name or company_name == "-":
+                company_name = info.get('longName') or info.get('shortName')
+                
+            if not company_name or company_name == ticker:
+                # 야후와 핀비즈 모두 실패 시, SEC 1만개 리스트에서 이름 강제 추출!
+                for item in all_tickers_list:
+                    if item.startswith(ticker + " "):
+                        match = re.search(r'\((.*?)\)', item)
+                        if match:
+                            company_name = match.group(1)
+                            break
+                            
+            if not company_name:
+                company_name = ticker
+
             is_main_value_stock = False
             value_sectors = ["consumer defensive", "utilities", "energy", "real estate", "financial services", "basic materials", "industrials"]
             
@@ -468,9 +500,10 @@ if ticker_input:
             elif score >= 5: judgment = "🟢 분할 매수 / 관망 (Accumulate/Hold)"; banner_class = "hold-banner"; prog_color = "#166534"
             else: judgment = "🔴 매도 / 주의 (Sell/Warning)"; banner_class = "sell-banner"; prog_color = "#b91c1c"
             
+            # 💡 [핵심] 완벽한 풀네임 복원 배너
             st.markdown(f"""
 <div class="banner {banner_class}">
-    <h2>{info.get('shortName', ticker) or ticker} ({ticker})</h2>
+    <h2>{company_name} ({ticker})</h2>
     <p>퀀트 평가 등급: <b style="font-size:1.3rem;">{judgment}</b> &nbsp;|&nbsp; 스코어 : <b>{score} 점</b> </p>
 </div>
 """, unsafe_allow_html=True)
