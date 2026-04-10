@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import google.generativeai as genai
 import re
+import time # 💡 딜레이(Sleep)를 위한 모듈 추가
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -35,7 +36,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 💡 실시간 거시경제 데이터 (야후 자체 엔진 활용)
+# ==============================================================
+# 💡 [핵심 최적화 V4.7] 스마트 딜레이 & API 호출 최소화 엔진
+# ==============================================================
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_macro_data():
     try: usdkrw = yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1]
@@ -44,7 +48,6 @@ def get_macro_data():
     except: tnx = 4.2  
     return float(usdkrw), float(tnx)
 
-# 💡 AI 동종 업계 자동 탐색기
 @st.cache_data(ttl=86400, show_spinner="AI가 해당 산업의 최적 경쟁사를 탐색 중입니다... 🕵️‍♂️")
 def get_dynamic_peers(ticker, name, sector):
     try:
@@ -57,37 +60,85 @@ def get_dynamic_peers(ticker, name, sector):
         return clean_res
     except: return ""
 
-# 💡 경쟁사 데이터 수집 (야후 자체 엔진 활용)
-@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다...") 
+@st.cache_data(ttl=300, show_spinner="경쟁사 멀티플 데이터를 수집 중입니다... (스텔스 모드 가동 🐢)") 
 def get_peers_data(ticker, peer_str):
     peer_list = [p.strip().upper() for p in peer_str.split(",") if p.strip()]
     if ticker not in peer_list:
         peer_list = [ticker] + peer_list
     data = []
+    
+    # 경쟁사 1개당 1번씩 찌를 때마다 0.5초씩 숨을 고릅니다. (Rate limit 회피)
     for p in peer_list:
-        try:
-            info = yf.Ticker(p).info
-            data.append({
-                "Ticker": p,
-                "Price": info.get("currentPrice", np.nan),
-                "Fwd P/E": info.get("forwardPE", np.nan),
-                "EV/EBITDA": info.get("enterpriseToEbitda", np.nan),
-                "P/S": info.get("priceToSalesTrailing12Months", np.nan),
-                "EV/Rev": info.get("enterpriseToRevenue", np.nan)
-            })
-        except: pass
+        for attempt in range(3): # 최대 3번 재시도
+            try:
+                info = yf.Ticker(p).info
+                data.append({
+                    "Ticker": p,
+                    "Price": info.get("currentPrice", np.nan),
+                    "Fwd P/E": info.get("forwardPE", np.nan),
+                    "EV/EBITDA": info.get("enterpriseToEbitda", np.nan),
+                    "P/S": info.get("priceToSalesTrailing12Months", np.nan),
+                    "EV/Rev": info.get("enterpriseToRevenue", np.nan)
+                })
+                break # 성공하면 반복문 탈출
+            except Exception as e:
+                if "429" in str(e) or "Rate" in str(e): time.sleep(2) # 차단 시 2초 대기 후 재시도
+                else: break
+        time.sleep(0.5) # 정상 처리 후에도 0.5초 대기
+        
     return pd.DataFrame(data)
 
-# 💡 개별 종목 데이터 수집 (야후 자체 엔진 활용)
-@st.cache_data(ttl=300, show_spinner="티커 재무 데이터를 분석하고 있습니다...") 
+@st.cache_data(ttl=300, show_spinner="티커 재무 및 차트 데이터를 분석 중입니다... (데이터 최적화 스캔 중 📡)") 
 def get_stock_market_data(ticker):
     stock = yf.Ticker(ticker)
-    info = stock.info
-    hist = stock.history(period="2y")
-    hist_10y = stock.history(period="10y", interval="1mo")
-    hist_daily_5y = stock.history(period="5y", interval="1d")
-    hist_weekly = hist_daily_5y.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna() if not hist_daily_5y.empty else pd.DataFrame()
+    info = {}
+    
+    # 1. Info 가져오기 (지능형 재시도)
+    for attempt in range(3):
+        try:
+            info = stock.info
+            break
+        except Exception as e:
+            if "429" in str(e) or "Rate" in str(e): time.sleep(2)
+            else: break
+            
+    time.sleep(0.5)
+    
+    # 2. History 가져오기 (호출 횟수 절반으로 최적화!)
+    hist_daily_5y = pd.DataFrame()
+    for attempt in range(3):
+        try:
+            # 5년치 일봉 데이터 한 번만 호출해서 다 뽑아냅니다.
+            hist_daily_5y = stock.history(period="5y", interval="1d")
+            if not hist_daily_5y.empty: break
+        except Exception as e:
+            if "429" in str(e) or "Rate" in str(e): time.sleep(2)
+            else: break
+
+    hist = pd.DataFrame()
+    hist_weekly = pd.DataFrame()
+    
+    if not hist_daily_5y.empty:
+        # 5년치 데이터에서 마지막 504일(약 2년)치만 잘라서 hist에 저장 (추가 호출 방지)
+        hist = hist_daily_5y.tail(504).copy()
+        # 일봉 데이터를 주봉으로 자체 변환 (추가 호출 방지)
+        hist_weekly = hist_daily_5y.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
+        
+    time.sleep(0.5)
+
+    # 3. 10년치 월봉 데이터 가져오기
+    hist_10y = pd.DataFrame()
+    for attempt in range(3):
+        try:
+            hist_10y = stock.history(period="10y", interval="1mo")
+            if not hist_10y.empty: break
+        except Exception as e:
+            if "429" in str(e) or "Rate" in str(e): time.sleep(2)
+            else: break
+            
     return info, hist, hist_10y, hist_weekly
+
+# ==============================================================
 
 ex_rate, risk_free_rate = get_macro_data()
 
@@ -205,12 +256,12 @@ with st.sidebar:
     st.caption(sgr_caption)
 
 def fmt_price(val):
-    if pd.isna(val) or val == "N/A" or val is None: return "N/A"
+    if pd.isna(val) or val == "N/A" or val is None or val == 0: return "N/A"
     if is_krw: return f"₩{val * ex_rate:,.0f}"
     return f"${val:,.2f}"
 
 def fmt_multi(val):
-    if pd.isna(val) or val == "N/A" or val is None: return "-"
+    if pd.isna(val) or val == "N/A" or val is None or val == 0: return "-"
     return f"{val:.2f}배"
 
 def fmt_pct(val):
@@ -229,7 +280,7 @@ if ticker_input:
         info, hist, hist_10y, hist_weekly = get_stock_market_data(ticker)
         
         if hist.empty or len(hist) < 20:
-            st.error("데이터가 부족하거나 티커가 올바르지 않습니다. (신규 상장 종목은 최소 20일의 거래 데이터가 필요합니다.)")
+            st.error(f"[{ticker}] 데이터를 야후 파이낸스에서 불러오지 못했습니다. 잠시 후 다시 시도해 주시거나 티커를 확인해 주세요. (Rate Limit이 걸렸을 경우 5분 뒤 자동으로 해제됩니다.)")
         else:
             hist['SMA50'] = hist['Close'].rolling(window=50).mean()
             hist['SMA200'] = hist['Close'].rolling(window=200).mean()
