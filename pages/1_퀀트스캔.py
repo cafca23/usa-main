@@ -122,19 +122,25 @@ def get_peers_data(ticker, peer_str):
             try: fund = finvizfinance(p).ticker_fundament()
             except: pass
 
-        fwd_pe = info.get("forwardPE") or parse_fz(fund.get('Forward P/E'))
-        ps = info.get("priceToSalesTrailing12Months") or parse_fz(fund.get('P/S'))
+        fwd_pe = info.get("forwardPE")
+        if fwd_pe is None: fwd_pe = parse_fz(fund.get('Forward P/E'))
+        
+        ps = info.get("priceToSalesTrailing12Months")
+        if ps is None: ps = parse_fz(fund.get('P/S'))
+        
         ev_ebitda = info.get("enterpriseToEbitda", np.nan)
         ev_rev = info.get("enterpriseToRevenue", np.nan)
-        price = info.get("currentPrice") or parse_fz(fund.get('Price'))
+        
+        price = info.get("currentPrice")
+        if price is None: price = parse_fz(fund.get('Price'))
 
         data.append({
             "Ticker": p,
-            "Price": price if price else np.nan,
-            "Fwd P/E": fwd_pe if fwd_pe else np.nan,
-            "EV/EBITDA": ev_ebitda if ev_ebitda else np.nan,
-            "P/S": ps if ps else np.nan,
-            "EV/Rev": ev_rev if ev_rev else np.nan
+            "Price": price if price is not None else np.nan,
+            "Fwd P/E": fwd_pe if fwd_pe is not None else np.nan,
+            "EV/EBITDA": ev_ebitda if pd.notna(ev_ebitda) else np.nan,
+            "P/S": ps if ps is not None else np.nan,
+            "EV/Rev": ev_rev if pd.notna(ev_rev) else np.nan
         })
         time.sleep(0.5) 
         
@@ -270,10 +276,10 @@ with st.sidebar:
 
     peer_input = st.text_input("경쟁사 티커 (쉼표로 구분)", value=default_peers, help="AI가 자동으로 찾아낸 경쟁사입니다. 직접 수정하셔도 됩니다.")
 
-    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_reset':
+    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_reset_fix':
         st.session_state.g_slider = default_g
         st.session_state.last_ticker = ticker_input
-        st.session_state.app_version = 'v_final_reset'
+        st.session_state.app_version = 'v_final_reset_fix'
         
     st.divider()
     
@@ -343,44 +349,63 @@ if ticker_input:
             hist['RSI'] = 100 - (100 / (1 + rs))
             hist['OBV'] = (np.sign(hist['Close'].diff()) * hist['Volume']).fillna(0).cumsum()
 
-            current_price = info.get('currentPrice') or parse_fz(fund_data.get('Price')) or hist['Close'].iloc[-1]
+            current_price = info.get('currentPrice')
+            if current_price is None: current_price = parse_fz(fund_data.get('Price'))
+            if current_price is None: current_price = hist['Close'].iloc[-1]
+            
             sma50_val = hist['SMA50'].iloc[-1] if len(hist) >= 50 else np.nan
             sma200_val = hist['SMA200'].iloc[-1] if len(hist) >= 200 else np.nan
             rsi_val = hist['RSI'].iloc[-1]
             
-            eps = info.get('trailingEps') or parse_fz(fund_data.get('EPS (ttm)'))
-            pbr = info.get('priceToBook') or parse_fz(fund_data.get('P/B'))
-            roe = info.get('returnOnEquity') or parse_fz(fund_data.get('ROE'), 'percent')
+            eps = info.get('trailingEps')
+            if eps is None: eps = parse_fz(fund_data.get('EPS (ttm)'))
+            
+            pbr = info.get('priceToBook')
+            if pbr is None: pbr = parse_fz(fund_data.get('P/B'))
+            
+            roe = info.get('returnOnEquity')
+            if roe is None: roe = parse_fz(fund_data.get('ROE'), 'percent')
             
             de_yf = info.get('debtToEquity')
             de_fz = parse_fz(fund_data.get('Debt/Eq'))
             debt_to_equity = de_yf if de_yf is not None else (de_fz * 100 if de_fz is not None else None)
             
-            peg_ratio = info.get('pegRatio') or parse_fz(fund_data.get('PEG'))
+            peg_ratio = info.get('pegRatio')
+            if peg_ratio is None: peg_ratio = parse_fz(fund_data.get('PEG'))
+            
             fcf = fcf_yf if fcf_yf is not None else info.get('freeCashflow')
-            payout_ratio = info.get('payoutRatio') or parse_fz(fund_data.get('Payout'), 'percent') or 0
-            shares = info.get('sharesOutstanding') or parse_fz(fund_data.get('Shs Outstand'), 'large_num')
+            
+            # 💡 [V5.5 패치] 배당 성향 0을 False로 인식하는 버그 완전 차단
+            payout_ratio = info.get('payoutRatio')
+            if payout_ratio is None: payout_ratio = parse_fz(fund_data.get('Payout'), 'percent')
+            
+            shares = info.get('sharesOutstanding')
+            if shares is None: shares = parse_fz(fund_data.get('Shs Outstand'), 'large_num')
             
             sector = str(info.get('sector', '')).lower()
             industry = str(info.get('industry', '')).lower()
             
             ev_ebitda = info.get('enterpriseToEbitda', None)
-            ps_ratio = info.get('priceToSalesTrailing12Months') or parse_fz(fund_data.get('P/S'))
-            ev_revenue = info.get('enterpriseToRevenue', None)
-            forward_pe = info.get('forwardPE') or parse_fz(fund_data.get('Forward P/E'))
             
-            # 💡 [V5.4 핵심 패치] 기관 보유율 및 스마트머니 지표를 무조건 핀비즈에서 먼저 가져오도록 강제 덮어쓰기
+            ps_ratio = info.get('priceToSalesTrailing12Months')
+            if ps_ratio is None: ps_ratio = parse_fz(fund_data.get('P/S'))
+            
+            ev_revenue = info.get('enterpriseToRevenue', None)
+            
+            forward_pe = info.get('forwardPE')
+            if forward_pe is None: forward_pe = parse_fz(fund_data.get('Forward P/E'))
+            
             short_pct = parse_fz(fund_data.get('Short Float'), 'percent')
             if short_pct is None: short_pct = info.get('shortPercentOfFloat')
             
             insider_pct = parse_fz(fund_data.get('Insider Own'), 'percent')
             if insider_pct is None: insider_pct = info.get('heldPercentInsiders')
             
-            # 기관 보유율 핀비즈 우선 추출
             inst_pct = parse_fz(fund_data.get('Inst Own'), 'percent')
             if inst_pct is None: inst_pct = info.get('heldPercentInstitutions')
             
-            earnings_growth = info.get('earningsGrowth') or parse_fz(fund_data.get('EPS next Y'), 'percent')
+            earnings_growth = info.get('earningsGrowth')
+            if earnings_growth is None: earnings_growth = parse_fz(fund_data.get('EPS next Y'), 'percent')
             
             company_name = fund_data.get('Company')
             if not company_name or company_name == "-":
@@ -400,7 +425,8 @@ if ticker_input:
             is_main_value_stock = False
             value_sectors = ["consumer defensive", "utilities", "energy", "real estate", "financial services", "basic materials", "industrials"]
             
-            if any(v_sec in sector for v_sec in value_sectors) or payout_ratio >= 0.40:
+            # payout_ratio가 None이 아니고 0.4(40%) 이상일 때 가치주로 분류
+            if any(v_sec in sector for v_sec in value_sectors) or (payout_ratio is not None and payout_ratio >= 0.40):
                 is_main_value_stock = True
                 
             if "aerospace" in industry or "defense" in industry:
@@ -600,10 +626,13 @@ if ticker_input:
                     fcf_krw = f"₩{fcf_krw_val/1e12:.1f}조" if fcf_krw_val >= 1e12 else (f"₩{fcf_krw_val/1e8:.0f}억" if fcf_krw_val >= 1e8 else f"₩{fcf_krw_val:,.0f}")
                     fcf_val = f"{fcf_usd} ({fcf_krw})"
                 
-                payout_val = f"{payout_ratio * 100:.1f}%" if payout_ratio else "N/A"
+                # 💡 [V5.5 핵심 패치] 배당성향이 0이더라도 N/A가 아닌 정상 값(0.0%)으로 출력되도록 수정
+                payout_val = "N/A"
+                if payout_ratio is not None:
+                    payout_val = f"{payout_ratio * 100:.1f}%"
+                    
                 inst_val_display = f"{inst_pct * 100:.2f}%" if inst_pct is not None else "N/A"
                 
-                # 💡 [V5.4 기능 추가] 퀀트 스캔 탭에도 기관 보유율 4단계 평가 로직(뱃지) 동일 적용
                 own_delta = None
                 own_color = "off"
                 if inst_pct is not None:
@@ -625,17 +654,17 @@ if ticker_input:
 
                 with pc1: st.metric(label="PEG Ratio (성장성 대비 가치)", value=peg_val, delta=peg_delta, delta_color="normal" if peg_ratio and peg_ratio <= 1.0 else "inverse", help=peg_help_text)
                 with pc2: st.metric(label="Free Cash Flow (잉여현금흐름)", value=fcf_val, delta="현금창출 긍정적" if fcf and fcf > 0 else "우려", delta_color="normal" if fcf and fcf > 0 else "inverse", help="회사가 필수적인 투자를 다 하고도 통장에 남는 순수한 잉여 여윳돈입니다. 이 돈으로 배당을 주거나 빚을 갚을 수 있어 아주 중요합니다.")
-                with pc3: st.metric(label="Payout Ratio (배당 성향)", value=payout_val, delta="건전" if payout_ratio and payout_ratio <= 0.6 else "과부하 우려", delta_color="normal" if payout_ratio and payout_ratio <= 0.6 else "inverse", help="순이익 중 주주들에게 배당금으로 나눠주는 비율입니다. 너무 높으면 미래 투자가 어렵고 배당 삭감 위험이 있습니다.")
+                with pc3: st.metric(label="Payout Ratio (배당 성향)", value=payout_val, delta="건전" if payout_ratio is not None and payout_ratio <= 0.6 else "과부하 우려", delta_color="normal" if payout_ratio is not None and payout_ratio <= 0.6 else "inverse", help="순이익 중 주주들에게 배당금으로 나눠주는 비율입니다. 너무 높으면 미래 투자가 어렵고 배당 삭감 위험이 있습니다.")
                 with pc4: st.metric(label="Inst. Ownership (기관 보유율)", value=inst_val_display, delta=own_delta, delta_color=own_color, help="월가 기관 투자자(헤지펀드, 연기금 등)들이 이 회사 주식을 얼마나 쥐고 있는지를 나타냅니다. 50% 이상이면 주도적 매수세가 있다고 봅니다.")
                 
                 st.markdown("<hr style='margin: 15px 0; border-color: #30363d;'>", unsafe_allow_html=True)
                 st.markdown("<p style='color:#8b949e; font-weight:bold; margin-bottom:10px;'>🔍 알파 스프레드 기반 상대가치 지표 (Relative Valuation Multiples)</p>", unsafe_allow_html=True)
                 
                 rc1, rc2, rc3, rc4 = st.columns(4)
-                with rc1: st.metric(label="EV/EBITDA (현금창출비율)", value=f"{ev_ebitda:.2f}배" if ev_ebitda else "N/A", help="기업가치(부채포함)를 영업이익(EBITDA)으로 나눈 값입니다. 보통 10배 이하일 때 저평가로 봅니다.")
-                with rc2: st.metric(label="P/S Ratio (주가/매출액)", value=f"{ps_ratio:.2f}배" if ps_ratio else "N/A", help="시가총액을 연간 매출액으로 나눈 배수입니다. 이익이 안 나는 고성장 기업의 상대적 몸값을 잴 때 필수적입니다.")
-                with rc3: st.metric(label="EV/Revenue (기업가치/매출)", value=f"{ev_revenue:.2f}배" if ev_revenue else "N/A", help="기업가치를 매출액으로 나눈 값으로, P/S보다 부채까지 고려하여 더 정교하게 몸값을 잽니다.")
-                with rc4: st.metric(label="Forward P/E (선행 PER)", value=f"{forward_pe:.2f}배" if forward_pe else "N/A", help="향후 1년 예상 순이익 대비 주가가 몇 배인지 나타냅니다. 과거 실적보다 미래의 기대치를 엿볼 수 있습니다.")
+                with rc1: st.metric(label="EV/EBITDA (현금창출비율)", value=f"{ev_ebitda:.2f}배" if pd.notna(ev_ebitda) else "N/A", help="기업가치(부채포함)를 영업이익(EBITDA)으로 나눈 값입니다. (핀비즈 미제공 항목, 야후 서버에서 누락 시 N/A로 표시됩니다.)")
+                with rc2: st.metric(label="P/S Ratio (주가/매출액)", value=f"{ps_ratio:.2f}배" if pd.notna(ps_ratio) else "N/A", help="시가총액을 연간 매출액으로 나눈 배수입니다. 이익이 안 나는 고성장 기업의 상대적 몸값을 잴 때 필수적입니다.")
+                with rc3: st.metric(label="EV/Revenue (기업가치/매출)", value=f"{ev_revenue:.2f}배" if pd.notna(ev_revenue) else "N/A", help="기업가치를 매출액으로 나눈 값입니다. (핀비즈 미제공 항목, 야후 서버에서 누락 시 N/A로 표시됩니다.)")
+                with rc4: st.metric(label="Forward P/E (선행 PER)", value=f"{forward_pe:.2f}배" if pd.notna(forward_pe) else "N/A", help="향후 1년 예상 순이익 대비 주가가 몇 배인지 나타냅니다. 적자 기업일 경우 N/A로 표시됩니다.")
                 
                 st.markdown("<hr style='margin: 15px 0; border-color: #30363d;'>", unsafe_allow_html=True)
                 st.markdown("<p style='color:#e879f9; font-weight:bold; margin-bottom:10px;'>🕵️‍♂️ 월스트리트 스마트머니 & 심리 지표 (Smart Money & Sentiment)</p>", unsafe_allow_html=True)
@@ -695,13 +724,13 @@ if ticker_input:
                 """, unsafe_allow_html=True)
 
             with st.expander("💡 알파 스프레드 4대 핵심 지표 완벽 해독 가이드", expanded=False):
-                ev_e_text = f"{ev_ebitda:.2f}배" if ev_ebitda else "N/A"
-                ps_text = f"{ps_ratio:.2f}배" if ps_ratio else "N/A"
-                ev_r_text = f"{ev_revenue:.2f}배" if ev_revenue else "N/A"
-                fwd_pe_text = f"{forward_pe:.2f}배" if forward_pe else "N/A"
-                ev_e_years = f"약 {int(ev_ebitda)}년" if ev_ebitda else "알 수 없는 기간"
-                ev_e_eval = "꽤 비싼(고평가)" if ev_ebitda and ev_ebitda > 10 else "저렴한(저평가)"
-                pe_eval = "시장 평균 대비 비싸게" if forward_pe and forward_pe > 15 else "시장 평균 대비 저렴하게"
+                ev_e_text = f"{ev_ebitda:.2f}배" if pd.notna(ev_ebitda) else "N/A"
+                ps_text = f"{ps_ratio:.2f}배" if pd.notna(ps_ratio) else "N/A"
+                ev_r_text = f"{ev_revenue:.2f}배" if pd.notna(ev_revenue) else "N/A"
+                fwd_pe_text = f"{forward_pe:.2f}배" if pd.notna(forward_pe) else "N/A"
+                ev_e_years = f"약 {int(ev_ebitda)}년" if pd.notna(ev_ebitda) else "알 수 없는 기간"
+                ev_e_eval = "꽤 비싼(고평가)" if pd.notna(ev_ebitda) and ev_ebitda > 10 else "저렴한(저평가)"
+                pe_eval = "시장 평균 대비 비싸게" if pd.notna(forward_pe) and forward_pe > 15 else "시장 평균 대비 저렴하게"
                 
                 st.markdown(f"""
                 **① EV/EBITDA (현재 {ev_e_text})**
