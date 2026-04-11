@@ -308,10 +308,10 @@ with st.sidebar:
 
     peer_input = st.text_input("경쟁사 티커 (쉼표로 구분)", value=default_peers, help="AI가 자동으로 찾아낸 경쟁사입니다. 직접 수정하셔도 됩니다.")
 
-    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_split_banner':
+    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_us_grid':
         st.session_state.g_slider = default_g
         st.session_state.last_ticker = ticker_input
-        st.session_state.app_version = 'v_final_split_banner'
+        st.session_state.app_version = 'v_final_us_grid'
         
     st.divider()
     
@@ -558,7 +558,6 @@ if ticker_input:
             elif score >= 5: judgment = "🟢 분할 매수 / 관망 (Accumulate/Hold)"; banner_class = "hold-banner"; prog_color = "#166534"
             else: judgment = "🔴 매도 / 주의 (Sell/Warning)"; banner_class = "sell-banner"; prog_color = "#b91c1c"
             
-            # 💡 [V6.1 핵심 패치] 배너 2분할(좌/우) 레이아웃 적용
             exchange = info.get('exchange', 'US Market')
             if exchange == 'NMS': exchange = 'NASDAQ'
             elif exchange == 'NYQ': exchange = 'NYSE'
@@ -579,23 +578,25 @@ if ticker_input:
 </div>
 """, unsafe_allow_html=True)
             
-            items_html = "".join([f'''<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; margin-bottom: 8px; background-color: #161b22; border-radius: 6px; border-left: 4px solid {'#3fb950' if item["status"] == 'pass' else ('#f85149' if item["status"] == 'fail' else '#d29922')}; border: 1px solid #30363d;">
-    <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-        <span style="font-size: 1.1rem;">{'✅' if item["status"] == 'pass' else ('❌' if item["status"] == 'fail' else '💡')}</span>
-        <span style="color: {'#3fb950' if item["status"] == 'pass' else ('#f85149' if item["status"] == 'fail' else '#d29922')}; font-weight: bold; font-size: 0.8rem; min-width: 50px; text-align: center;">{item["category"]}</span>
-        <span style="color: #c9d1d9; font-size: 0.95rem;">{item["desc"]}</span>
+            # 💡 [V6.5 핵심 패치] CSS Grid를 활용하여 왼쪽/오른쪽 박스 높이를 1px 오차 없이 완벽 매칭
+            # 글씨 크기도 2포인트(0.2rem 단위)씩 모두 키워 가독성 향상
+            items_html = "".join([f'''<div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 18px; margin-bottom: 10px; background-color: #161b22; border-radius: 6px; border-left: 4px solid {'#3fb950' if item["status"] == 'pass' else ('#f85149' if item["status"] == 'fail' else '#d29922')}; border: 1px solid #30363d;">
+    <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
+        <span style="font-size: 1.3rem;">{'✅' if item["status"] == 'pass' else ('❌' if item["status"] == 'fail' else '💡')}</span>
+        <span style="color: {'#3fb950' if item["status"] == 'pass' else ('#f85149' if item["status"] == 'fail' else '#d29922')}; font-weight: bold; font-size: 1.0rem; min-width: 60px; text-align: center;">{item["category"]}</span>
+        <span style="color: #c9d1d9; font-size: 1.15rem;">{item["desc"]}</span>
     </div>
-    <div style="font-weight: bold; color: {'#3fb950' if item["status"] == 'pass' else ('#f85149' if item["status"] == 'fail' else '#d29922')}; font-size: 1.05rem;">{item["score"]}점</div>
+    <div style="font-weight: bold; color: {'#3fb950' if item["status"] == 'pass' else ('#f85149' if item["status"] == 'fail' else '#d29922')}; font-size: 1.25rem;">{item["score"]}점</div>
 </div>''' for item in checklist])
             
             st.markdown(f"""
-<div style="display: flex; gap: 20px; align-items: stretch; margin-bottom: 20px; flex-wrap: wrap;">
-    <div class='checklist-box' style='flex: 1 1 300px; text-align:center; display: flex; flex-direction: column; justify-content: center;'>
+<div style="display: grid; grid-template-columns: 1fr 1.8fr; gap: 20px; align-items: stretch; margin-bottom: 20px;">
+    <div style="background-color: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; margin: 0;">
         <h3 style='margin:0 0 10px 0; color:#8b949e;'>TOTAL SCORE</h3>
-        <h1 style='font-size: 5rem; margin:10px 0; color:{prog_color};'>{score}<span style='font-size: 2.5rem; color:#8b949e;'> / 10</span></h1>
+        <h1 style='font-size: 5.5rem; margin:10px 0; color:{prog_color};'>{score}<span style='font-size: 2.5rem; color:#8b949e;'> / 10</span></h1>
     </div>
-    <div class='checklist-box' style='flex: 1.8 1 500px; justify-content: flex-start;'>
-        <h3 style='margin:0 0 15px 0; color:#8b949e;'>평가 내용</h3>{items_html}
+    <div style="background-color: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; display: flex; flex-direction: column; justify-content: center; margin: 0;">
+        <h3 style='margin:0 0 15px 0; color:#8b949e; font-size: 1.4rem;'>평가 내용</h3>{items_html}
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -606,18 +607,18 @@ if ticker_input:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns(4)
                 with c1: st.metric(label="현재 주가", value=fmt_price(current_price), delta=f"{drawdown:.2f}% (최고가대비)")
-                with c2: st.metric(label=f"적정 주가 ({model_used})", value=fmt_price(final_fair_value), 
+                with c2: st.metric(label=f"적정 주가 ({model_used})", value=fmt_price(final_fair_value) if final_fair_value != "N/A" else "N/A", 
                                    delta=f"{margin_of_safety:.2f}% (안전마진)" if margin_of_safety != "N/A" else None,
                                    help="테크/성장주는 현금흐름할인(DCF) 모델로, 가치/배당주는 그레이엄 모델로 자동 산출됩니다.")
                 with c3: st.metric(label="1년 MDD (최대 낙폭)", value=f"{mdd:.2f}%", delta="Max Drawdown", delta_color="inverse")
-                with c4: st.metric(label="EPS (주당순이익)", value=fmt_price(eps), 
+                with c4: st.metric(label="EPS (주당순이익)", value=fmt_price(eps) if pd.notna(eps) else "N/A", 
                                    help="1주당 회사가 벌어들인 순이익을 의미해요. 숫자가 클수록 회사의 기업 가치가 크고, 배당 줄 수 있는 여유가 늘어났다고 볼 수 있어요.")
                     
             with st.container(border=True):
                 c5, c6, c7, c8 = st.columns(4)
-                with c5: st.metric(label="PBR", value=pbr if isinstance(pbr, str) else f"{pbr:.2f}배", 
+                with c5: st.metric(label="PBR", value=f"{pbr:.2f}배" if pd.notna(pbr) and pbr != 'N/A' else "N/A", 
                                    help="주가가 1주당 장부상 순자산가치의 몇 배로 거래되는지 나타냅니다. 1 미만이면 회사를 다 팔아도 남는 돈보다 주가가 싸다는 뜻(저평가)입니다.")
-                with c6: st.metric(label="ROE", value=f"{roe*100:.2f}%" if roe is not None else "N/A", 
+                with c6: st.metric(label="ROE", value=f"{roe*100:.2f}%" if pd.notna(roe) else "N/A", 
                                    help="회사가 주주의 돈(자본)을 굴려서 1년간 얼마를 벌었는지 보여주는 핵심 수익성 지표입니다. (통상 15% 이상이면 우량 기업으로 평가)")
                 with c7: st.metric(label="52주 최고가", value=fmt_price(high_1y))
                 with c8: st.metric(label="52주 최저가", value=fmt_price(low_1y))
@@ -664,6 +665,8 @@ if ticker_input:
                 peg_val = f"{peg_ratio:.2f}배" if peg_ratio else "N/A"
                 peg_delta = ("저평가 구간" if peg_ratio and peg_ratio <= 1.0 else "고평가 구간") if peg_ratio else None
                 peg_help_text = "PER(주가수익비율)을 이익성장률로 나눈 값입니다. 보통 1.0 이하이면 기업의 미래 성장 속도에 비해 현재 주가가 싸다(저평가)고 판단합니다."
+                if peg_ratio is None: 
+                    peg_help_text += "\n\n🚨 [N/A 발생 이유]\n해당 기업이 적자 상태이거나 핀비즈/야후 파이낸스에 향후 5년 성장률 추정치가 존재하지 않기 때문입니다."
                 
                 fcf_val = "N/A"
                 if fcf is not None:
