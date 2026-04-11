@@ -10,6 +10,7 @@ import re
 import time
 import requests
 from finvizfinance.quote import finvizfinance 
+from deep_translator import GoogleTranslator # 💡 번역기 추가
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -37,6 +38,36 @@ st.markdown("""
     .peer-median-row { background-color: #21262d; font-weight: bold; color: #8b949e; border-top: 2px solid #30363d; }
 </style>
 """, unsafe_allow_html=True)
+
+# 💡 [새로운 AI 기능] 한글 종목명 및 1줄 비즈니스 요약 생성기
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_korean_profile(ticker, eng_name, eng_desc, api_key):
+    try:
+        if not api_key:
+            translator = GoogleTranslator(source='auto', target='ko')
+            short_desc = eng_desc.split(". ")[0] + "." if eng_desc else "기업 설명이 없습니다."
+            return eng_name, translator.translate(short_desc)
+
+        genai.configure(api_key=api_key)
+        valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        target_model = valid_models[0] if valid_models else 'models/gemini-1.5-flash'
+        for name in valid_models:
+            if "1.5-flash" in name: target_model = name; break
+        
+        model = genai.GenerativeModel(target_model)
+        prompt = f"""
+        미국 주식 티커 {ticker} ({eng_name})의 영문 설명이야: {eng_desc}
+        이 정보를 바탕으로 한국 증권사(토스, 네이버 등)에서 보여줄 법한 아주 깔끔한 형태의 '한글 종목명'과 '1줄 비즈니스 요약'을 작성해줘.
+        예시) 이오밴스 바이오테라퓨틱스|면역 체계를 활용한 암 치료제 개발 및 상용화에 주력하는 제약바이오 회사
+        
+        반드시 '한글종목명|1줄요약' 형태로만 대답해. 다른 말은 절대 금지.
+        """
+        res = model.generate_content(prompt).text.strip()
+        if "|" in res:
+            return res.split("|")[0].strip(), res.split("|")[1].strip()
+        return eng_name, res
+    except:
+        return eng_name, "기업 요약 정보를 불러올 수 없습니다."
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_all_us_tickers():
@@ -276,10 +307,10 @@ with st.sidebar:
 
     peer_input = st.text_input("경쟁사 티커 (쉼표로 구분)", value=default_peers, help="AI가 자동으로 찾아낸 경쟁사입니다. 직접 수정하셔도 됩니다.")
 
-    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_reset_fix':
+    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_kor':
         st.session_state.g_slider = default_g
         st.session_state.last_ticker = ticker_input
-        st.session_state.app_version = 'v_final_reset_fix'
+        st.session_state.app_version = 'v_final_kor'
         
     st.divider()
     
@@ -327,6 +358,9 @@ def fmt_pct(val):
     return f"{val * 100:.2f}%"
 
 # --- 메인 로직 ---
+# 💡 API 키 불러오기 (글로벌스코프 적용)
+api_key = st.secrets.get("GEMINI_API_KEY", None)
+
 col_header1, col_header2 = st.columns([3, 1])
 with col_header1:
     st.markdown("<h1 style='margin-bottom: 0; font-size: 2.0rem;'>📈 미장 All 퀀트 스캐너</h1>", unsafe_allow_html=True)
@@ -375,7 +409,6 @@ if ticker_input:
             
             fcf = fcf_yf if fcf_yf is not None else info.get('freeCashflow')
             
-            # 💡 [V5.5 패치] 배당 성향 0을 False로 인식하는 버그 완전 차단
             payout_ratio = info.get('payoutRatio')
             if payout_ratio is None: payout_ratio = parse_fz(fund_data.get('Payout'), 'percent')
             
@@ -425,7 +458,6 @@ if ticker_input:
             is_main_value_stock = False
             value_sectors = ["consumer defensive", "utilities", "energy", "real estate", "financial services", "basic materials", "industrials"]
             
-            # payout_ratio가 None이 아니고 0.4(40%) 이상일 때 가치주로 분류
             if any(v_sec in sector for v_sec in value_sectors) or (payout_ratio is not None and payout_ratio >= 0.40):
                 is_main_value_stock = True
                 
@@ -526,9 +558,18 @@ if ticker_input:
             elif score >= 5: judgment = "🟢 분할 매수 / 관망 (Accumulate/Hold)"; banner_class = "hold-banner"; prog_color = "#166534"
             else: judgment = "🔴 매도 / 주의 (Sell/Warning)"; banner_class = "sell-banner"; prog_color = "#b91c1c"
             
+            # 💡 [V6.0 핵심 패치] AI 연동 한글 종목명 및 1줄 요약 출력
+            exchange = info.get('exchange', 'US Market')
+            if exchange == 'NMS': exchange = 'NASDAQ'
+            elif exchange == 'NYQ': exchange = 'NYSE'
+            
+            eng_desc = info.get('longBusinessSummary', '')
+            kr_name, kr_summary = get_korean_profile(ticker, company_name, eng_desc, api_key)
+            
             st.markdown(f"""
 <div class="banner {banner_class}">
-    <h2>{company_name} ({ticker})</h2>
+    <h2 style="margin-bottom: 5px; font-size: 2.2rem;">{kr_name} <span style="font-size:1.2rem; color:#8b949e; font-weight:normal;">미국 · {ticker} · {exchange}</span></h2>
+    <p style="font-size: 1.05rem; color: #c9d1d9; margin-bottom: 15px; font-weight: 400; background-color: rgba(255,255,255,0.05); padding: 10px; border-radius: 5px; display: inline-block;">💡 {kr_summary}</p>
     <p>퀀트 평가 등급: <b style="font-size:1.3rem;">{judgment}</b> &nbsp;|&nbsp; 스코어 : <b>{score} 점</b> </p>
 </div>
 """, unsafe_allow_html=True)
@@ -626,11 +667,7 @@ if ticker_input:
                     fcf_krw = f"₩{fcf_krw_val/1e12:.1f}조" if fcf_krw_val >= 1e12 else (f"₩{fcf_krw_val/1e8:.0f}억" if fcf_krw_val >= 1e8 else f"₩{fcf_krw_val:,.0f}")
                     fcf_val = f"{fcf_usd} ({fcf_krw})"
                 
-                # 💡 [V5.5 핵심 패치] 배당성향이 0이더라도 N/A가 아닌 정상 값(0.0%)으로 출력되도록 수정
-                payout_val = "N/A"
-                if payout_ratio is not None:
-                    payout_val = f"{payout_ratio * 100:.1f}%"
-                    
+                payout_val = f"{payout_ratio * 100:.1f}%" if payout_ratio is not None else "N/A"
                 inst_val_display = f"{inst_pct * 100:.2f}%" if inst_pct is not None else "N/A"
                 
                 own_delta = None
@@ -661,10 +698,10 @@ if ticker_input:
                 st.markdown("<p style='color:#8b949e; font-weight:bold; margin-bottom:10px;'>🔍 알파 스프레드 기반 상대가치 지표 (Relative Valuation Multiples)</p>", unsafe_allow_html=True)
                 
                 rc1, rc2, rc3, rc4 = st.columns(4)
-                with rc1: st.metric(label="EV/EBITDA (현금창출비율)", value=f"{ev_ebitda:.2f}배" if pd.notna(ev_ebitda) else "N/A", help="기업가치(부채포함)를 영업이익(EBITDA)으로 나눈 값입니다. (핀비즈 미제공 항목, 야후 서버에서 누락 시 N/A로 표시됩니다.)")
+                with rc1: st.metric(label="EV/EBITDA (현금창출비율)", value=f"{ev_ebitda:.2f}배" if pd.notna(ev_ebitda) else "N/A", help="기업가치(부채포함)를 영업이익(EBITDA)으로 나눈 값입니다. 보통 10배 이하일 때 저평가로 봅니다.")
                 with rc2: st.metric(label="P/S Ratio (주가/매출액)", value=f"{ps_ratio:.2f}배" if pd.notna(ps_ratio) else "N/A", help="시가총액을 연간 매출액으로 나눈 배수입니다. 이익이 안 나는 고성장 기업의 상대적 몸값을 잴 때 필수적입니다.")
-                with rc3: st.metric(label="EV/Revenue (기업가치/매출)", value=f"{ev_revenue:.2f}배" if pd.notna(ev_revenue) else "N/A", help="기업가치를 매출액으로 나눈 값입니다. (핀비즈 미제공 항목, 야후 서버에서 누락 시 N/A로 표시됩니다.)")
-                with rc4: st.metric(label="Forward P/E (선행 PER)", value=f"{forward_pe:.2f}배" if pd.notna(forward_pe) else "N/A", help="향후 1년 예상 순이익 대비 주가가 몇 배인지 나타냅니다. 적자 기업일 경우 N/A로 표시됩니다.")
+                with rc3: st.metric(label="EV/Revenue (기업가치/매출)", value=f"{ev_revenue:.2f}배" if pd.notna(ev_revenue) else "N/A", help="기업가치를 매출액으로 나눈 값으로, P/S보다 부채까지 고려하여 더 정교하게 몸값을 잽니다.")
+                with rc4: st.metric(label="Forward P/E (선행 PER)", value=f"{forward_pe:.2f}배" if pd.notna(forward_pe) else "N/A", help="향후 1년 예상 순이익 대비 주가가 몇 배인지 나타냅니다. 과거 실적보다 미래의 기대치를 엿볼 수 있습니다.")
                 
                 st.markdown("<hr style='margin: 15px 0; border-color: #30363d;'>", unsafe_allow_html=True)
                 st.markdown("<p style='color:#e879f9; font-weight:bold; margin-bottom:10px;'>🕵️‍♂️ 월스트리트 스마트머니 & 심리 지표 (Smart Money & Sentiment)</p>", unsafe_allow_html=True)
