@@ -10,7 +10,7 @@ import re
 import time
 import requests
 from finvizfinance.quote import finvizfinance 
-from deep_translator import GoogleTranslator # 💡 번역기 추가
+from deep_translator import GoogleTranslator 
 
 st.set_page_config(page_title="1. 미장 All 퀀트 스캐너", layout="wide", page_icon="📈", initial_sidebar_state="expanded")
 
@@ -19,10 +19,12 @@ st.markdown("""
 <style>
     [data-testid="stMetricValue"] { font-size: 26px !important; font-weight: 700 !important; color: #e6edf3; }
     [data-testid="stMetricLabel"] { color: #8b949e !important; font-weight: 600 !important; text-transform: uppercase; font-size: 0.85rem !important; letter-spacing: 0.05em; }
-    .banner { padding: 1.5rem; border-radius: 8px; text-align: center; margin-bottom: 2rem; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    .banner { padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: space-between; }
     .buy-banner { background: linear-gradient(135deg, #0d47a1 0%, #1976d2 100%); color: white; border: 1px solid #1565c0; } 
     .hold-banner { background: linear-gradient(135deg, #052e16 0%, #166534 100%); color: white; border: 1px solid #15803d; }
     .sell-banner { background: linear-gradient(135deg, #450a0a 0%, #991b1b 100%); color: white; border: 1px solid #b91c1c; } 
+    .banner-left { flex: 1; text-align: left; padding-right: 20px; border-right: 1px solid rgba(255,255,255,0.2); }
+    .banner-right { flex: 1; text-align: center; padding-left: 20px; }
     .banner h2 { margin: 0; padding: 0; font-size: 2.2rem; text-shadow: 0 2px 4px rgba(0,0,0,0.4); }
     .banner p { margin: 8px 0 0 0; font-size: 1.15rem; opacity: 0.95; font-weight: 500;}
     .checklist-box { background-color: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; height: 100%; display: flex; flex-direction: column; justify-content: space-between; }
@@ -39,7 +41,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 💡 [새로운 AI 기능] 한글 종목명 및 1줄 비즈니스 요약 생성기
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_korean_profile(ticker, eng_name, eng_desc, api_key):
     try:
@@ -307,10 +308,10 @@ with st.sidebar:
 
     peer_input = st.text_input("경쟁사 티커 (쉼표로 구분)", value=default_peers, help="AI가 자동으로 찾아낸 경쟁사입니다. 직접 수정하셔도 됩니다.")
 
-    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_kor':
+    if 'last_ticker' not in st.session_state or st.session_state.last_ticker != ticker_input or st.session_state.get('app_version') != 'v_final_split_banner':
         st.session_state.g_slider = default_g
         st.session_state.last_ticker = ticker_input
-        st.session_state.app_version = 'v_final_kor'
+        st.session_state.app_version = 'v_final_split_banner'
         
     st.divider()
     
@@ -358,7 +359,6 @@ def fmt_pct(val):
     return f"{val * 100:.2f}%"
 
 # --- 메인 로직 ---
-# 💡 API 키 불러오기 (글로벌스코프 적용)
 api_key = st.secrets.get("GEMINI_API_KEY", None)
 
 col_header1, col_header2 = st.columns([3, 1])
@@ -558,7 +558,7 @@ if ticker_input:
             elif score >= 5: judgment = "🟢 분할 매수 / 관망 (Accumulate/Hold)"; banner_class = "hold-banner"; prog_color = "#166534"
             else: judgment = "🔴 매도 / 주의 (Sell/Warning)"; banner_class = "sell-banner"; prog_color = "#b91c1c"
             
-            # 💡 [V6.0 핵심 패치] AI 연동 한글 종목명 및 1줄 요약 출력
+            # 💡 [V6.1 핵심 패치] 배너 2분할(좌/우) 레이아웃 적용
             exchange = info.get('exchange', 'US Market')
             if exchange == 'NMS': exchange = 'NASDAQ'
             elif exchange == 'NYQ': exchange = 'NYSE'
@@ -568,9 +568,14 @@ if ticker_input:
             
             st.markdown(f"""
 <div class="banner {banner_class}">
-    <h2 style="margin-bottom: 5px; font-size: 2.2rem;">{kr_name} <span style="font-size:1.2rem; color:#8b949e; font-weight:normal;">미국 · {ticker} · {exchange}</span></h2>
-    <p style="font-size: 1.05rem; color: #c9d1d9; margin-bottom: 15px; font-weight: 400; background-color: rgba(255,255,255,0.05); padding: 10px; border-radius: 5px; display: inline-block;">💡 {kr_summary}</p>
-    <p>퀀트 평가 등급: <b style="font-size:1.3rem;">{judgment}</b> &nbsp;|&nbsp; 스코어 : <b>{score} 점</b> </p>
+    <div class="banner-left">
+        <h2 style="margin-bottom: 5px; font-size: 2.2rem;">{kr_name} <span style="font-size:1.2rem; color:#8b949e; font-weight:normal;">미국 · {ticker} · {exchange}</span></h2>
+        <p style="font-size: 1.05rem; color: #c9d1d9; margin-top: 10px; margin-bottom: 0; font-weight: 400; background-color: rgba(255,255,255,0.05); padding: 10px; border-radius: 5px; display: inline-block;">💡 {kr_summary}</p>
+    </div>
+    <div class="banner-right">
+        <p style="margin-bottom: 5px; color: rgba(255,255,255,0.8); font-size: 1rem;">퀀트 시스템 최종 평가</p>
+        <p style="font-size: 1.4rem; margin-top: 0;">등급: <b>{judgment}</b> &nbsp;|&nbsp; 스코어: <b style="font-size: 1.6rem;">{score}점</b></p>
+    </div>
 </div>
 """, unsafe_allow_html=True)
             
