@@ -189,26 +189,20 @@ PEER_MAP = {
     "AMZN": "WMT, TGT, GOOGL", "META": "GOOGL, SNAP, PINS", "AMD": "NVDA, INTC, QCOM"
 }
 
-# 💡 전체 티커 리스트 미리 로드
 all_tickers_list = get_all_us_tickers()
 
-# 💡 Session State 초기화 (선택된 타깃 기억용)
 if "target_ticker" not in st.session_state:
     st.session_state.target_ticker = "AAPL"
 
-# 💡 검색창 변경 감지 콜백 함수
 def handle_search():
     val = st.session_state.search_dropdown
     if val and val not in ["🔍 종목을 검색/선택하세요...", "➕ 직접 티커 수동 입력..."]:
-        # 선택한 티커를 메모리에 저장
         st.session_state.target_ticker = val.split(" ")[0].upper()
-        # 검색창은 다시 빈칸(안내문구)으로 초기화!
         st.session_state.search_dropdown = "🔍 종목을 검색/선택하세요..."
 
 with st.sidebar:
     st.markdown("### ⚙️ 분석 설정")
     
-    # 💡 1. 자동 초기화되는 스마트 검색창
     st.selectbox(
         "🔍 종목 검색 (알파벳을 치면 자동완성 됨)", 
         ["🔍 종목을 검색/선택하세요...", "➕ 직접 티커 수동 입력..."] + all_tickers_list, 
@@ -224,7 +218,6 @@ with st.sidebar:
             
     ticker_input = st.session_state.target_ticker
     
-    # 💡 현재 분석 중인 타깃을 명확하게 표시
     st.success(f"🎯 현재 분석 타깃: **{ticker_input}**")
     
     st.divider()
@@ -376,17 +369,24 @@ if ticker_input:
             ev_revenue = info.get('enterpriseToRevenue', None)
             forward_pe = info.get('forwardPE') or parse_fz(fund_data.get('Forward P/E'))
             
-            short_pct = info.get('shortPercentOfFloat') or parse_fz(fund_data.get('Short Float'), 'percent')
-            insider_pct = info.get('heldPercentInsiders') or parse_fz(fund_data.get('Insider Own'), 'percent')
+            # 💡 [V5.4 핵심 패치] 기관 보유율 및 스마트머니 지표를 무조건 핀비즈에서 먼저 가져오도록 강제 덮어쓰기
+            short_pct = parse_fz(fund_data.get('Short Float'), 'percent')
+            if short_pct is None: short_pct = info.get('shortPercentOfFloat')
+            
+            insider_pct = parse_fz(fund_data.get('Insider Own'), 'percent')
+            if insider_pct is None: insider_pct = info.get('heldPercentInsiders')
+            
+            # 기관 보유율 핀비즈 우선 추출
+            inst_pct = parse_fz(fund_data.get('Inst Own'), 'percent')
+            if inst_pct is None: inst_pct = info.get('heldPercentInstitutions')
+            
             earnings_growth = info.get('earningsGrowth') or parse_fz(fund_data.get('EPS next Y'), 'percent')
             
-            # 💡 2. 3중 교차 검증을 통한 진짜 '회사 풀네임' 추출 엔진
             company_name = fund_data.get('Company')
             if not company_name or company_name == "-":
                 company_name = info.get('longName') or info.get('shortName')
                 
             if not company_name or company_name == ticker:
-                # 야후와 핀비즈 모두 실패 시, SEC 1만개 리스트에서 이름 강제 추출!
                 for item in all_tickers_list:
                     if item.startswith(ticker + " "):
                         match = re.search(r'\((.*?)\)', item)
@@ -500,7 +500,6 @@ if ticker_input:
             elif score >= 5: judgment = "🟢 분할 매수 / 관망 (Accumulate/Hold)"; banner_class = "hold-banner"; prog_color = "#166534"
             else: judgment = "🔴 매도 / 주의 (Sell/Warning)"; banner_class = "sell-banner"; prog_color = "#b91c1c"
             
-            # 💡 [핵심] 완벽한 풀네임 복원 배너
             st.markdown(f"""
 <div class="banner {banner_class}">
     <h2>{company_name} ({ticker})</h2>
@@ -593,8 +592,6 @@ if ticker_input:
                 peg_val = f"{peg_ratio:.2f}배" if peg_ratio else "N/A"
                 peg_delta = ("저평가 구간" if peg_ratio and peg_ratio <= 1.0 else "고평가 구간") if peg_ratio else None
                 peg_help_text = "PER(주가수익비율)을 이익성장률로 나눈 값입니다. 보통 1.0 이하이면 기업의 미래 성장 속도에 비해 현재 주가가 싸다(저평가)고 판단합니다."
-                if peg_ratio is None: 
-                    peg_help_text += "\n\n🚨 [N/A 발생 이유]\n해당 기업이 적자 상태이거나 핀비즈/야후 파이낸스에 향후 5년 성장률 추정치가 존재하지 않기 때문입니다."
                 
                 fcf_val = "N/A"
                 if fcf is not None:
@@ -604,12 +601,32 @@ if ticker_input:
                     fcf_val = f"{fcf_usd} ({fcf_krw})"
                 
                 payout_val = f"{payout_ratio * 100:.1f}%" if payout_ratio else "N/A"
-                inst_val = f"{insider_pct * 100:.1f}%" if insider_pct else "N/A"
+                inst_val_display = f"{inst_pct * 100:.2f}%" if inst_pct is not None else "N/A"
+                
+                # 💡 [V5.4 기능 추가] 퀀트 스캔 탭에도 기관 보유율 4단계 평가 로직(뱃지) 동일 적용
+                own_delta = None
+                own_color = "off"
+                if inst_pct is not None:
+                    try:
+                        own_val = inst_pct * 100
+                        if own_val < 20:
+                            own_delta = "🌱 개미 놀이터 (야생의 영역)"
+                            own_color = "off"
+                        elif own_val < 40:
+                            own_delta = "🔥 텐배거 발진 구간 (스마트머니 진입)"
+                            own_color = "normal"
+                        elif own_val <= 70:
+                            own_delta = "⭐️ 우량주 황금비율 (안정적 성장기)"
+                            own_color = "normal"
+                        else:
+                            own_delta = "⚠️ 과열/블루칩 (상승 여력 제한적)"
+                            own_color = "inverse"
+                    except: pass
 
                 with pc1: st.metric(label="PEG Ratio (성장성 대비 가치)", value=peg_val, delta=peg_delta, delta_color="normal" if peg_ratio and peg_ratio <= 1.0 else "inverse", help=peg_help_text)
                 with pc2: st.metric(label="Free Cash Flow (잉여현금흐름)", value=fcf_val, delta="현금창출 긍정적" if fcf and fcf > 0 else "우려", delta_color="normal" if fcf and fcf > 0 else "inverse", help="회사가 필수적인 투자를 다 하고도 통장에 남는 순수한 잉여 여윳돈입니다. 이 돈으로 배당을 주거나 빚을 갚을 수 있어 아주 중요합니다.")
                 with pc3: st.metric(label="Payout Ratio (배당 성향)", value=payout_val, delta="건전" if payout_ratio and payout_ratio <= 0.6 else "과부하 우려", delta_color="normal" if payout_ratio and payout_ratio <= 0.6 else "inverse", help="순이익 중 주주들에게 배당금으로 나눠주는 비율입니다. 너무 높으면 미래 투자가 어렵고 배당 삭감 위험이 있습니다.")
-                with pc4: st.metric(label="Inst. Ownership (기관 보유율)", value=f"{info.get('heldPercentInstitutions', 0) * 100:.1f}%" if info.get('heldPercentInstitutions') else "N/A", help="월가 기관 투자자(헤지펀드, 연기금 등)들이 이 회사 주식을 얼마나 쥐고 있는지를 나타냅니다. 50% 이상이면 주도적 매수세가 있다고 봅니다.")
+                with pc4: st.metric(label="Inst. Ownership (기관 보유율)", value=inst_val_display, delta=own_delta, delta_color=own_color, help="월가 기관 투자자(헤지펀드, 연기금 등)들이 이 회사 주식을 얼마나 쥐고 있는지를 나타냅니다. 50% 이상이면 주도적 매수세가 있다고 봅니다.")
                 
                 st.markdown("<hr style='margin: 15px 0; border-color: #30363d;'>", unsafe_allow_html=True)
                 st.markdown("<p style='color:#8b949e; font-weight:bold; margin-bottom:10px;'>🔍 알파 스프레드 기반 상대가치 지표 (Relative Valuation Multiples)</p>", unsafe_allow_html=True)
