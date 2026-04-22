@@ -956,6 +956,9 @@ if ticker_input:
                 </div>
                 """, unsafe_allow_html=True)
 
+            # ==========================================
+            # 🤖 AI 수석 비서 종합 리포트 출력부
+            # ==========================================
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("### 🤖 수석 비서의 AI 종합 브리핑 (Tier 1)")
             if st.button("✨ 퀀트 데이터 기반 AI 분석 보고서 작성", type="primary", width="stretch"):
@@ -963,31 +966,83 @@ if ticker_input:
                     try:
                         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                         model = genai.GenerativeModel('gemini-2.5-flash', generation_config={"temperature": 0.7, "max_output_tokens": 8000})
-                        ai_median_pe = f"{median_pe:.2f}배" if not peer_df.empty else "데이터 없음"
-                        short_text = f"{short_pct*100:.2f}%" if short_pct else "데이터 없음"
                         
+                        # 💡 [핵심 패치 1] NoneType 에러 완벽 방어를 위한 안전 함수 적용
+                        ai_median_pe = fmt_multi(median_pe) if not peer_df.empty else "데이터 없음"
+                        ai_median_ps = fmt_multi(median_ps) if not peer_df.empty else "데이터 없음"
+                        
+                        # 💡 [핵심 패치 2] 7단계 전문가 리포트 양식 및 쉼표 없는 해시태그 적용
                         prompt = f"""
-                        당신은 수석 퀀트 애널리스트입니다. [{ticker}] 분석 데이터를 브리핑해주세요.
-                        - 터미널 점수: 10점 만점에 {score}점 ({judgment})
-                        - 적용된 모델: {model_used} / 공매도 비율: {short_text}
-                        - 해당 기업 Forward P/E: {forward_pe}배 / 동종 업계 경쟁사 Forward P/E 중앙값: {ai_median_pe}
-                        - ROE: {roe*100:.1f}% / 현재 미국 국채 금리: {risk_free_rate:.2f}%
-                        
-                        [작성 규칙]
-                        1. 시작: "대표님, [{ticker}] 스마트머니 및 퀀트 종합 분석 보고드립니다." (이 문장만 예외로 '니다' 사용)
-                        2. 어투: 문장 끝에 "~습니다", "~입니다" 등 경어체 절대 금지. 반드시 "~함", "~됨", "~임", "~음"으로 끝나는 간결한 개조식/보고서체로 작성할 것.
-                        3. 공매도 수급 평가: 이 기업이 {model_used}로 평가되는 기업(가치주/성장주)이라는 점을 감안하여, 공매도 비율({short_text})이 위험한 수준인지 브리핑할 것. (가치주는 3%, 테크주는 10% 기준)
-                        4. 핵심 분석: 해당 기업의 P/E가 동종업계 중앙값보다 싼지 비싼지(상대가치)를 비교하여 매력도를 분석할 것.
-                        5. 별표(*)와 이모지 사용 금지 (마지막 줄 전구 제외). 대괄호([ ]) 사용.
-                        6. 가독성(매우 중요): 마침표(.)를 찍은 후에는 무조건 줄바꿈(엔터)을 넣어서 문장이 한 칸 아래로 내려가게 할 것. (문단이 아닌 문장 단위로 줄바꿈)
-                        7. 마지막 줄: "💡 수석 비서의 최종 투자의견:" 이라는 항목 달고 1줄 요약 결론.
+                        당신은 월스트리트와 여의도를 섭렵한 최고의 수석 퀀트 애널리스트입니다. 
+                        제공된 [{company_name} ({ticker})]의 팩트 데이터와 당신이 보유한 기업 지식을 종합하여, 
+                        아래 [지정된 리포트 양식]에 맞춰 완벽한 네이버 블로그용 심층 분석 보고서를 작성해 주세요.
+
+                        [분석용 기초 데이터]
+                        - 퀀트 시스템 점수: 10점 만점에 {score}점 ({judgment})
+                        - 적용 모델: {model_used} / 공매도 비율: {fmt_pct(short_pct)} / 내부자 보유율: {fmt_pct(insider_pct)}
+                        - 펀더멘털: ROE {fmt_pct(roe)} / 배당성향 {fmt_pct(payout_ratio)} 
+                        - 밸류에이션: 선행 PER {fmt_multi(forward_pe)}, P/S {fmt_multi(ps_ratio)}, EV/EBITDA {fmt_multi(ev_ebitda)}
+                        - 동종 업계(경쟁사) 중앙값: 선행 PER {ai_median_pe}, P/S {ai_median_ps}
+
+                        [🚨 작성 규칙]
+                        1. 시작: "대표님, [{company_name}] 4차원 매트릭스 및 수급 종합 분석 보고드립니다."
+                        2. 어투: 문장 끝은 반드시 "~함", "~임", "~됨", "~기대됨" 등 간결한 보고서체로 작성할 것. (예: 저평가 상태임. 주의가 필요함.)
+                        3. 내용 밀도: 각 항목의 '- 분석 요약:'과 '- 핵심 근거:' 사이에는 절대 빈 줄(엔터)을 넣지 말고 바로 위아래로 붙여서 출력할 것.
+                        4. 기호 통제: 이모지는 제목에만 쓰고 본문에는 절대 쓰지 말 것.
+                        5. 해시태그 규칙: "블로그용 해시태그" 같은 설명 문구는 절대 쓰지 말고, 오직 태그만 맨 마지막에 쉼표(,) 없이 빈칸(스페이스바)으로 한 칸씩만 띄워서 딱 10개 나열할 것.
+
+                        [지정된 리포트 양식]
+                        ### 1. 비즈니스 모델 및 경제적 해자 : [ A / B / C ] 등급
+                        - **분석 요약:** (무엇으로 돈을 버는지, 해자의 종류와 대체 불가능한 경쟁 우위 기술력을 작성)
+                        - **핵심 근거:** (독점력, 네트워크 효과 등 명확한 근거 작성)
+
+                        ### 2. 재무 건전성 및 수익성 (Alpha Spread 기준) : [ A / B / C ] 등급
+                        - **분석 요약:** (마진율, ROE, 부채비율 등 재무적 안전성과 수익 창출 능력을 작성)
+                        - **핵심 근거:** (동종 업계 대비 마진율 등)
+
+                        ### 3. 경영진 및 주주 거버넌스 : [ A / B / C ] 등급
+                        - **분석 요약:** (자본 배치 능력, 배당 및 주주 환원 정책의 일관성을 작성)
+                        - **핵심 근거:** (꾸준한 배당 성장, 내부자 매입 이력 등)
+
+                        ### 4. 밸류에이션 및 안전마진 (Finbox 기준) : [ A / B / C ] 등급
+                        - **분석 요약:** (현재 주가가 내재 가치 대비 저평가인지, 역사적 멀티플 하단인지 작성)
+                        - **핵심 근거:** (적용 모델 기준 내재 가치 등 팩트 서술)
+
+                        ### 5. 촉매제(Catalyst) 및 리스크 : [ A / B / C ] 등급
+                        - **분석 요약:** (주가를 끌어올릴 호재 모멘텀과 발목을 잡을 위험 요소를 작성)
+                        - **핵심 근거:** (신제품 출시 기대감, 거시 경제 취약성, 공매도 비율 리스크 등)
+
+                        ### 6. 동종 업계 멀티플 비교
+                        - (경쟁사 대비 선행 PER, P/S 수준을 비교하여 상대적 매력도 판정)
+
+                        ### 7. 주요 판매처 및 밸류체인 확인
+                        - (핵심 고객사와 글로벌 공급망 내 위치 설명)
+
+                        ---
+                        ### 🏆 최종 종합 등급 : [ A / B / C ]
+                        - **투자 결론:** (종합 매력도 요약)
+                        - **트레이딩 전략:** (진입 타점 및 대응책)
+
+                        #{ticker}주가 #{ticker}전망 #{ticker}실적 #미국주식 #미장시황 #실전매매 #주식분석 #퀀트투자
                         """
                         response = model.generate_content(prompt)
                         st.success("✅ 종합 브리핑 완료!")
                         with st.container(border=True):
-                            clean_text = re.sub(r'[\U00010000-\U0010ffff]', '', response.text.replace("*", "")).replace(". ", ".\n\n")
-                            st.markdown(clean_text)
-                    except Exception as e: st.error(f"🚨 AI 오류: {e}")
+                            clean_text = response.text
+                            clean_text = re.sub(r'[\U00010000-\U0010ffff]', '', clean_text)
+                            clean_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', clean_text)
+                            clean_text = clean_text.replace("*", "")
+                            
+                            # 💡 파이썬 기본 개행(\n)만 HTML 줄바꿈(<br>)으로 바꿔줍니다. (마침표 분리 제거)
+                            clean_text = clean_text.replace('\n', '<br>')
+                            
+                            st.markdown(f"""
+<div style="font-size: 20px; line-height: 1.8; color: #e6edf3; padding: 10px;">
+{clean_text}
+</div>
+""", unsafe_allow_html=True)
+                    except Exception as e: 
+                        st.error(f"🚨 AI 오류: {e}")
 
     except Exception as e:
         st.error(f"데이터 처리 중 오류가 발생했습니다: {e}")
